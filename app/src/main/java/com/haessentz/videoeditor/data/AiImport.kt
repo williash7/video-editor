@@ -71,8 +71,7 @@ object AiImport {
         return if (p.size == 3) p[0] * 3_600_000 + p[1] * 60_000 + p[2] * 1000 else p[0] * 60_000 + p[1] * 1000
     }
 
-    private fun clean(line: String): String = line.replace("**", "").replace("__", "").replace("`", "")
-        .replace('–', '-').replace('—', '-').replace('־', '-').trim()
+    private fun clean(line: String): String = line.replace("**", "").replace("__", "").replace("`", "").trim()
 
     private fun header(line: String): Pair<Sec, String>? {
         val raw = clean(line)
@@ -98,8 +97,12 @@ object AiImport {
         return sec to (if (sec == Sec.TITLE || sec == Sec.DESC) rest else "")
     }
 
-    private fun labelAfter(line: String, lastTimeEnd: Int): String =
-        line.substring(lastTimeEnd).trim().trimStart('|', '-', ':', '.', ',', ' ', '–').trim()
+    private val rangeRe = Regex("""(?<![\d:])(\d{1,2}:\d{2}(?::\d{2})?)\s*[-–—־]\s*(\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])""")
+    private val trailingNumRe = Regex("""\s*(?:[-*•▪◦]|\d+[.)])\s*$""")
+
+    /** Clean a label taken from between two times: separators at the start, list numbering at the end. */
+    private fun tidy(s: String): String =
+        s.trim().trimStart('|', '-', ':', '.', ',', ' ', '–', '—').replace(trailingNumRe, "").trim().trimEnd('|', ',', ' ').trim()
 
     fun parse(text: String): Result {
         val deletes = ArrayList<Item>()
@@ -113,7 +116,18 @@ object AiImport {
                 if (sec == Sec.DESC && desc.isNotEmpty()) desc.append('\n')
                 continue
             }
-            val h = header(rawLine)
+            var h = header(rawLine)
+            var lineText = rawLine
+            if (h == null) {
+                // "מחיקה 0:00-0:03 | ..." — keyword glued to the first item
+                val first = clean(rawLine).trimStart('#', ' ').substringBefore(' ')
+                val rest = clean(rawLine).trimStart('#', ' ').substringAfter(' ', "")
+                val hk = header(first)
+                if (hk != null && hk.first != Sec.TITLE && hk.first != Sec.DESC && timeRe.containsMatchIn(rest)) {
+                    sec = hk.first
+                    lineText = rest
+                }
+            }
             if (h != null) {
                 sec = h.first
                 if (h.second.isNotEmpty()) {
@@ -122,23 +136,31 @@ object AiImport {
                 }
                 continue
             }
-            val line = clean(rawLine)
+            val line = clean(lineText)
             val noBullet = line.replace(bulletRe, "")
             if (noBullet.startsWith("(") && noBullet.endsWith(")")) continue // instruction echo
             val times = timeRe.findAll(noBullet).toList()
             when (sec) {
-                Sec.DELETE, Sec.SHORTS -> if (times.size >= 2) {
-                    val a = parseTime(times[0].value)
-                    val b = parseTime(times[1].value)
-                    if (b > a) {
-                        val item = Item(Range(a, b), labelAfter(noBullet, times[1].range.last + 1))
-                        if (sec == Sec.DELETE) deletes.add(item) else shorts.add(item)
+                Sec.DELETE, Sec.SHORTS -> {
+                    // several items may arrive on one line when line breaks were lost in copying
+                    val ms = rangeRe.findAll(noBullet).toList()
+                    ms.forEachIndexed { i, m ->
+                        val a = parseTime(m.groupValues[1])
+                        val b = parseTime(m.groupValues[2])
+                        val end = if (i + 1 < ms.size) ms[i + 1].range.first else noBullet.length
+                        val label = tidy(noBullet.substring(m.range.last + 1, end))
+                        if (b > a) {
+                            val item = Item(Range(a, b), label)
+                            if (sec == Sec.DELETE) deletes.add(item) else shorts.add(item)
+                        }
                     }
                 }
                 Sec.CHAPTERS -> if (times.isNotEmpty() && times[0].range.first <= 3) {
-                    val t = parseTime(times[0].value)
-                    val name = labelAfter(noBullet, times[0].range.last + 1)
-                    if (name.isNotEmpty()) chapters.add(Chapter(t, name))
+                    times.forEachIndexed { i, m ->
+                        val end = if (i + 1 < times.size) times[i + 1].range.first else noBullet.length
+                        val name = tidy(noBullet.substring(m.range.last + 1, end))
+                        if (name.isNotEmpty()) chapters.add(Chapter(parseTime(m.value), name))
+                    }
                 }
                 Sec.TITLE -> if (title.isEmpty()) title = noBullet.trim('"', '\'', ' ')
                 Sec.DESC -> desc.append(line).append('\n')
