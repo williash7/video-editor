@@ -235,8 +235,7 @@ object Jobs {
                     outputs = pr.outputs.map { if (it.uri == plan.fileUri) it.copy(youtubeId = id) else it })
             }
             addLog(pid, "הועלה ליוטיוב ✓ https://youtu.be/$id" +
-                    if (yt.privacy == "private") "
-(הסרטון פרטי — אפשר לפרסם אותו מ־YouTube Studio)" else "")
+                    (if (yt.privacy == "private") "\n(הסרטון פרטי — אפשר לפרסם אותו מ־YouTube Studio)" else ""))
             val thumbDir = ProjectStore.dir(pid)
             val thumb = com.haessentz.videoeditor.media.Thumbs.finalFile(thumbDir)
             if (yt.hasThumb && thumb.exists()) {
