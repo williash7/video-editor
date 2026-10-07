@@ -61,6 +61,9 @@ import com.haessentz.videoeditor.data.ShortClip
 import com.haessentz.videoeditor.data.SubStyle
 import com.haessentz.videoeditor.data.fmtMs
 import com.haessentz.videoeditor.work.Jobs
+import com.haessentz.videoeditor.media.MediaSaver
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import java.util.UUID
 
 private fun clipboard(ctx: Context) = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -71,6 +74,13 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
     val ctx = LocalContext.current
     var editPrompt by remember { mutableStateOf(false) }
     var copied by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf<String?>(null) }
+    val openReply = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            val t = runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull()
+            if (t != null) ProjectStore.update(p.id) { it.copy(aiReply = t) }
+        }
+    }
 
     if (p.transcript.isEmpty()) {
         Text("קודם צריך לתמלל את הסרטון (לשונית תמלול). אחרי זה אפשר להעתיק את התמלול לבינה.", Modifier.padding(20.dp))
@@ -84,20 +94,24 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(14.dp)) {
                     Text("שלב 1: שולחים לבינה", fontWeight = FontWeight.Bold)
-                    Text("מעתיק את התמלול עם הזמנים, יחד עם הוראה שמבקשת מהבינה לענות בתבנית שהאפליקציה מבינה.",
+                    Text("התמלול עם הזמנים יוצא כקובץ, יחד עם הוראה שמבקשת מהבינה לענות בתבנית שהאפליקציה מבינה. קובץ עובר שלם גם בסרטון ארוך.",
                         style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(8.dp))
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
+                        Button(onClick = { shareAsFile(ctx, p) }) { Text("שלח קובץ לבינה") }
+                        FilledTonalButton(onClick = {
+                            saved = runCatching {
+                                MediaSaver.saveText(ctx, requestText(p), fileName(p), "text/plain")
+                                "נשמר בתיקיית ההורדות: Download/VideoEditor/${fileName(p)}"
+                            }.getOrElse { "השמירה נכשלה: ${it.message}" }
+                        }) { Text("שמור קובץ") }
+                        OutlinedButton(onClick = {
                             clipboard(ctx).setPrimaryClip(ClipData.newPlainText("תמלול", requestText(p)))
                             copied = true
-                        }) { Text(if (copied) "הועתק ✓" else "העתק לבינה") }
-                        FilledTonalButton(onClick = {
-                            val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, requestText(p))
-                            ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                        }) { Text("שתף…") }
+                        }) { Text(if (copied) "הועתק ✓" else "העתק") }
                         TextButton(onClick = { editPrompt = true }) { Text("ערוך הוראה") }
                     }
+                    saved?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
                     Text("${p.transcript.size} משפטים · כ־${requestText(p).length / 1000} אלף תווים", style = MaterialTheme.typography.labelSmall)
                 }
             }
@@ -113,6 +127,7 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
                             val t = clipboard(ctx).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString() ?: ""
                             ProjectStore.update(p.id) { it.copy(aiReply = t) }
                         }) { Text("הדבק מהלוח") }
+                        FilledTonalButton(onClick = { openReply.launch(arrayOf("text/*", "application/octet-stream")) }) { Text("טען מקובץ") }
                         if (p.aiReply.isNotEmpty()) OutlinedButton(onClick = { ProjectStore.update(p.id) { it.copy(aiReply = "") } }) { Text("נקה") }
                     }
                     Spacer(Modifier.height(6.dp))
@@ -150,6 +165,21 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
             }
         )
     }
+}
+
+private fun fileName(p: Project) = p.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(60) + " - תמלול.txt"
+
+/** Writes the request to a file and opens the share sheet, so the whole transcript arrives as an attachment. */
+private fun shareAsFile(ctx: Context, p: Project) {
+    val dir = java.io.File(ctx.cacheDir, "share").apply { mkdirs() }
+    val f = java.io.File(dir, fileName(p))
+    f.writeText(requestText(p), Charsets.UTF_8)
+    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+    val i = Intent(Intent.ACTION_SEND).setType("text/plain")
+        .putExtra(Intent.EXTRA_STREAM, uri)
+        .putExtra(Intent.EXTRA_SUBJECT, f.name)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
 private fun requestText(p: Project) = Prefs.aiPrompt + "\n\n" + AiImport.transcriptText(p.transcript)
