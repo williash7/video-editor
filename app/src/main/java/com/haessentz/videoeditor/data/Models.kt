@@ -37,6 +37,8 @@ data class ShortClip(
     val endMs: Long,
     /** Horizontal crop position for 9:16, 0 = left edge, 1 = right edge. */
     val cropX: Float = 0.5f,
+    /** True once the crop was set (by hand or by face detection), so it isn't recomputed. */
+    val framed: Boolean = false,
     /** Subtitle cues, times relative to [startMs]. */
     val cues: List<Seg> = emptyList(),
     val subtitles: Boolean = true,

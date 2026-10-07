@@ -83,6 +83,12 @@ import com.haessentz.videoeditor.media.SubtitleRenderer
 import com.haessentz.videoeditor.work.Jobs
 import androidx.compose.ui.platform.LocalContext
 import kotlin.math.roundToInt
+import android.net.Uri
+import androidx.compose.runtime.rememberCoroutineScope
+import com.haessentz.videoeditor.media.AutoFrame
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 @UnstableApi
 @Composable
@@ -101,6 +107,13 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
 
     val player = rememberPlayer(p.videoUri)
     LaunchedEffect(player) { player.seek(s.startMs, play = false) }
+    // centre on the speaker automatically the first time the short is opened
+    LaunchedEffect(sid) {
+        if (!s.framed) {
+            val x = withContext(Dispatchers.IO) { AutoFrame.cropFor(ctx, Uri.parse(p.videoUri), s.startMs, s.endMs, p.width, p.height) }
+            save { it.copy(cropX = x ?: it.cropX, framed = true) }
+        }
+    }
     // keep playback inside the short
     val rel = player.positionMs - s.startMs
     LaunchedEffect(player.positionMs) {
@@ -401,18 +414,36 @@ private fun ColorRow(colors: List<Long>, selected: Long, onPick: (Long) -> Unit)
 @Composable
 private fun FrameEditor(p: Project, s: ShortClip, save: ((ShortClip) -> ShortClip) -> Unit) {
     val vertical = p.width.toFloat() / p.height.coerceAtLeast(1) <= 9f / 16f + 0.01f
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var detecting by remember { mutableStateOf(false) }
+    var note by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         if (vertical) {
             Text("הסרטון כבר אנכי, אין צורך במסגור.")
         } else {
             Text("איזה חלק מהתמונה יופיע בשורט (שמאל ↔ ימין):", style = MaterialTheme.typography.labelLarge)
-            Slider(s.cropX, { v -> save { it.copy(cropX = v) } }, valueRange = 0f..1f)
+            Slider(s.cropX, { v -> save { it.copy(cropX = v, framed = true) } }, valueRange = 0f..1f)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallBtn("שמאל") { save { it.copy(cropX = 0f) } }
-                SmallBtn("מרכז") { save { it.copy(cropX = 0.5f) } }
-                SmallBtn("ימין") { save { it.copy(cropX = 1f) } }
+                SmallBtn("שמאל") { save { it.copy(cropX = 0f, framed = true) } }
+                SmallBtn("מרכז") { save { it.copy(cropX = 0.5f, framed = true) } }
+                SmallBtn("ימין") { save { it.copy(cropX = 1f, framed = true) } }
+                SmallBtn(if (detecting) "מחפש…" else "על הפנים ✨") {
+                    if (!detecting) {
+                        detecting = true
+                        scope.launch {
+                            val x = withContext(Dispatchers.IO) {
+                                AutoFrame.cropFor(ctx, Uri.parse(p.videoUri), s.startMs, s.endMs, p.width, p.height)
+                            }
+                            detecting = false
+                            if (x != null) save { it.copy(cropX = x, framed = true) } else note = "לא זיהיתי פנים בקטע הזה. אפשר לכוון ידנית."
+                        }
+                    }
+                }
             }
-            Text("התצוגה למעלה מראה בדיוק מה ייכנס לשורט.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+            Text("התצוגה למעלה מראה בדיוק מה ייכנס לשורט. אם לא כיוונת ידנית, בייצוא האפליקציה ממרכזת אוטומטית על הפנים.",
+                Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
+            note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
     }
 }

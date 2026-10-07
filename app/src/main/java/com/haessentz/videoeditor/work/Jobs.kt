@@ -189,8 +189,17 @@ object Jobs {
         val p = ProjectStore.get(pid) ?: return null
         val s = p.shorts.firstOrNull { it.id == shortId } ?: return null
         return JobManager.enqueue(ctx, "שורט: ${s.name}", pid, kind = "export") { js ->
+            var cropX = s.cropX
+            if (!s.framed) {
+                js.progress(-1f, "מאתר את הדובר במסגרת…")
+                val found = withContext(Dispatchers.IO) {
+                    com.haessentz.videoeditor.media.AutoFrame.cropFor(ctx, Uri.parse(p.videoUri), s.startMs, s.endMs, p.width, p.height)
+                }
+                if (found != null) cropX = found
+                ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(cropX = cropX, framed = true) else it }) }
+            }
             val cues = if (s.subtitles) s.cues else null
-            val effects = VideoExporter.shortEffects(p.width, p.height, s.cropX, cues, s.style, s.startMs)
+            val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs)
             val o = runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
             ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(outputUri = o.uri) else it }) }
             addLog(pid, "השורט מוכן ✓ ${o.name}")
