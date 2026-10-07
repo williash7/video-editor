@@ -62,6 +62,10 @@ object Prefs {
         get() = sp.getString("model", "ivrit-turbo") ?: "ivrit-turbo"
         set(v) = sp.edit().putString("model", v).apply()
 
+    var aiPrompt: String
+        get() = sp.getString("aiPrompt", null) ?: AiImport.DEFAULT_PROMPT
+        set(v) = sp.edit().putString("aiPrompt", v).apply()
+
     val defaultThreads: Int get() = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
     var threads: Int

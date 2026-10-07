@@ -24,6 +24,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.haessentz.videoeditor.work.fmtDuration
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +46,11 @@ fun JobsBar(projectId: String? = null) {
     val active = relevant.firstOrNull { it.status == JobStatus.RUNNING } ?: relevant.firstOrNull { it.status == JobStatus.QUEUED }
     val failed = relevant.lastOrNull { it.status == JobStatus.FAILED }
     if (active == null && failed == null) return
+    // tick every second so the elapsed time keeps moving
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(active?.id) {
+        while (true) { now = System.currentTimeMillis(); delay(1000) }
+    }
     Surface(tonalElevation = 3.dp, color = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp)) {
             if (active != null) {
@@ -52,6 +63,15 @@ fun JobsBar(projectId: String? = null) {
                                     if (queued > 0) " · עוד $queued בתור" else "",
                             style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis
                         )
+                    }
+                    if (active.status == JobStatus.RUNNING) {
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text("⏱ ${fmtDuration(active.elapsedMs(now))}", fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.labelLarge)
+                            active.remainingMs(now)?.let {
+                                Text("נשאר ~${fmtDuration(it)}", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
                     }
                     TextButton(onClick = { JobManager.cancel(active.id) }) { Text("בטל") }
                 }
@@ -67,7 +87,7 @@ fun JobsBar(projectId: String? = null) {
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("נכשל: ${failed.title} — ${failed.detail}", Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer,
+                    Text("נכשל: ${failed.title} (${fmtDuration(failed.elapsedMs())}) — ${failed.detail}", Modifier.weight(1f), color = MaterialTheme.colorScheme.onErrorContainer,
                         style = MaterialTheme.typography.bodySmall)
                     IconButton(onClick = { JobManager.dismiss(failed.id) }) { Icon(Icons.Default.Close, "סגור") }
                 }

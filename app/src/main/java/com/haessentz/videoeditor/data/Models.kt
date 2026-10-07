@@ -41,10 +41,42 @@ data class ShortClip(
     val cues: List<Seg> = emptyList(),
     val subtitles: Boolean = true,
     val style: SubStyle = SubStyle(),
+    /** Title for YouTube (e.g. suggested by the AI). */
+    val title: String = "",
+    /** Gallery uri of the last export of this short. */
+    val outputUri: String? = null,
+    val youtubeId: String? = null,
 )
 
 @Serializable
-data class OutputFile(val name: String, val uri: String, val createdAt: Long)
+data class OutputFile(
+    val name: String,
+    val uri: String,
+    val createdAt: Long,
+    /** "edited", "short", "clip", "part", "full" */
+    val kind: String = "",
+    /** Parts of the original removed in this file (for re-timing chapters). */
+    val removed: List<Range> = emptyList(),
+    val youtubeId: String? = null,
+)
+
+@Serializable
+data class Chapter(val ms: Long, val title: String)
+
+@Serializable
+data class YoutubeMeta(
+    val title: String = "",
+    val description: String = "",
+    /** Chapter times on the ORIGINAL video timeline. */
+    val chapters: List<Chapter> = emptyList(),
+    val privacy: String = "private",
+    /** Uri of the file to upload; null = choose automatically. */
+    val videoUri: String? = null,
+    val thumbText: String = "",
+    val thumbTextTop: Boolean = false,
+    val hasThumb: Boolean = false,
+    val lastVideoId: String? = null,
+)
 
 @Serializable
 data class Hit(val ms: Long, val label: String)
@@ -68,4 +100,6 @@ data class Project(
     val shorts: List<ShortClip> = emptyList(),
     val outputs: List<OutputFile> = emptyList(),
     val log: List<LogEntry> = emptyList(),
+    val youtube: YoutubeMeta = YoutubeMeta(),
+    val aiReply: String = "",
 )

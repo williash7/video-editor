@@ -99,7 +99,7 @@ fun ProjectScreen(pid: String, nav: Nav) {
     }
     val player = rememberPlayer(p.videoUri)
     var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("פקודות", "תמלול", "רשימת חיתוך", "שורטים", "קבצים")
+    val tabs = listOf("פקודות", "תמלול", "בינה", "רשימת חיתוך", "שורטים", "יוטיוב", "קבצים")
 
     Scaffold(
         topBar = {
@@ -125,8 +125,10 @@ fun ProjectScreen(pid: String, nav: Nav) {
                 when (tab) {
                     0 -> CommandsTab(p, player)
                     1 -> TranscriptTab(p, player, nav)
-                    2 -> CutListTab(p, player)
-                    3 -> ShortsTab(p, player, nav)
+                    2 -> AiTab(p, player, onDone = { tab = 5 })
+                    3 -> CutListTab(p, player)
+                    4 -> ShortsTab(p, player, nav)
+                    5 -> YoutubeTab(p, player)
                     else -> FilesTab(p)
                 }
             }

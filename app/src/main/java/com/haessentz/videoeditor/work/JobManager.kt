@@ -41,8 +41,27 @@ data class JobInfo(
     val detail: String = "",
     val projectId: String? = null,
     val kind: String = "",
+    val startedAt: Long = 0L,
+    val endedAt: Long = 0L,
 ) {
     val active get() = status == JobStatus.QUEUED || status == JobStatus.RUNNING
+
+    fun elapsedMs(now: Long = System.currentTimeMillis()): Long =
+        if (startedAt == 0L) 0L else (if (endedAt > 0) endedAt else now) - startedAt
+
+    /** Rough remaining time from progress so far; null when it can't be estimated yet. */
+    fun remainingMs(now: Long = System.currentTimeMillis()): Long? {
+        val e = elapsedMs(now)
+        if (status != JobStatus.RUNNING || progress < 0.03f || progress >= 1f || e < 5000) return null
+        return (e / progress - e).toLong()
+    }
+}
+
+fun fmtDuration(ms: Long): String {
+    val s = ms / 1000
+    val h = s / 3600; val m = (s / 60) % 60; val sec = s % 60
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec)
+    else String.format(java.util.Locale.US, "%d:%02d", m, sec)
 }
 
 class JobScope(val id: String) {
@@ -66,15 +85,18 @@ object JobManager {
         val job = scope.launch(start = CoroutineStart.LAZY) {
             try {
                 mutex.withLock {
-                    set(id) { it.copy(status = JobStatus.RUNNING) }
+                    set(id) { it.copy(status = JobStatus.RUNNING, startedAt = System.currentTimeMillis()) }
                     block(JobScope(id))
                 }
-                set(id) { it.copy(status = JobStatus.DONE, progress = 1f, detail = "") }
+                set(id) { it.copy(status = JobStatus.DONE, progress = 1f, detail = "", endedAt = System.currentTimeMillis()) }
+                report(id, "✓ $title — הסתיים תוך")
             } catch (e: CancellationException) {
-                set(id) { it.copy(status = JobStatus.CANCELLED, detail = "בוטל") }
+                set(id) { it.copy(status = JobStatus.CANCELLED, detail = "בוטל", endedAt = System.currentTimeMillis()) }
+                report(id, "✗ $title — בוטל אחרי")
             } catch (e: Throwable) {
                 Log.e("JobManager", "job failed", e)
-                set(id) { it.copy(status = JobStatus.FAILED, detail = e.message ?: e.javaClass.simpleName) }
+                set(id) { it.copy(status = JobStatus.FAILED, detail = e.message ?: e.javaClass.simpleName, endedAt = System.currentTimeMillis()) }
+                report(id, "✗ $title — נכשל אחרי")
             } finally {
                 running.remove(id)
                 hooks.remove(id)
@@ -83,6 +105,17 @@ object JobManager {
         running[id] = job
         job.start()
         return id
+    }
+
+    /** Writes the job's duration into its project's log so the user can track timings. */
+    private fun report(id: String, prefix: String) {
+        val j = _jobs.value.firstOrNull { it.id == id } ?: return
+        val pid = j.projectId ?: return
+        if (j.startedAt == 0L) return
+        val text = "⏱ $prefix ${fmtDuration(j.elapsedMs())}"
+        com.haessentz.videoeditor.data.ProjectStore.update(pid) {
+            it.copy(log = (it.log + com.haessentz.videoeditor.data.LogEntry(false, text)).takeLast(200))
+        }
     }
 
     fun cancel(id: String) {
@@ -131,6 +164,7 @@ class WorkService : Service() {
                     } else {
                         val queued = list.count { it.active } - 1
                         val text = buildString {
+                            if (cur.startedAt > 0) append("⏱ ${fmtDuration(cur.elapsedMs())} · ")
                             append(cur.detail.ifEmpty { "עובד…" })
                             if (queued > 0) append(" · עוד $queued בתור")
                         }

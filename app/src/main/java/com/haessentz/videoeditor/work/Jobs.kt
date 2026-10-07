@@ -101,7 +101,7 @@ object Jobs {
     private suspend fun runExport(
         ctx: Context, p: Project, js: JobScope, ranges: List<Range>,
         effects: List<androidx.media3.common.Effect>, name: String,
-        from: Float = 0f, to: Float = 1f,
+        from: Float = 0f, to: Float = 1f, kind: String = "clip", removed: List<Range> = emptyList(),
     ): OutputFile {
         val tmp = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
         VideoExporter.export(ctx, Uri.parse(p.videoUri), ranges, effects, tmp) { f ->
@@ -110,7 +110,7 @@ object Jobs {
         js.progress(to, "שומר לגלריה…")
         val display = safeName(name) + ".mp4"
         val uri = withContext(Dispatchers.IO) { MediaSaver.saveVideo(ctx, tmp, display) }
-        val out = OutputFile(display, uri.toString(), System.currentTimeMillis())
+        val out = OutputFile(display, uri.toString(), System.currentTimeMillis(), kind, removed)
         ProjectStore.update(p.id) { it.copy(outputs = listOf(out) + it.outputs) }
         return out
     }
@@ -123,7 +123,8 @@ object Jobs {
         val title = if (join) "מחבר ${rs.size} קטעים" else if (rs.size == 1) "חותך קטע" else "חותך ${rs.size} קטעים"
         return JobManager.enqueue(ctx, title, pid, kind = "export") { js ->
             if (join) {
-                val o = runExport(ctx, p, js, rs, emptyList(), "${p.name}_$label")
+                val removed = Ranges.complement(rs, p.durationMs, minKeepMs = 1)
+                val o = runExport(ctx, p, js, rs, emptyList(), "${p.name}_$label", kind = "edited", removed = removed)
                 addLog(pid, "מוכן ✓ ${o.name} נשמר בגלריה (תיקיית VideoEditor).")
             } else {
                 rs.forEachIndexed { i, r ->
@@ -157,7 +158,8 @@ object Jobs {
             val keep = Ranges.complement(silent, p.durationMs)
             val removed = p.durationMs - keep.sumOf { it.lengthMs }
             addLog(pid, "נמצאו ${silent.size} שתיקות (סה״כ ${removed / 1000} שניות). מייצא…")
-            val o = runExport(ctx, p, js, keep, emptyList(), "${p.name}_בלי_שתיקות", 0.2f, 1f)
+            val o = runExport(ctx, p, js, keep, emptyList(), "${p.name}_בלי_שתיקות", 0.2f, 1f,
+                kind = "edited", removed = Ranges.complement(keep, p.durationMs, minKeepMs = 1))
             addLog(pid, "מוכן ✓ ${o.name}")
         }
     }
@@ -177,7 +179,7 @@ object Jobs {
         return JobManager.enqueue(ctx, "פיצול ל־${ranges.size} חלקים", pid, kind = "export") { js ->
             ranges.forEachIndexed { i, r ->
                 val o = runExport(ctx, p, js, listOf(r), emptyList(), "${p.name}_חלק_${i + 1}",
-                    i.toFloat() / ranges.size, (i + 1).toFloat() / ranges.size)
+                    i.toFloat() / ranges.size, (i + 1).toFloat() / ranges.size, kind = "part")
                 addLog(pid, "מוכן ✓ ${o.name}")
             }
         }
@@ -189,7 +191,8 @@ object Jobs {
         return JobManager.enqueue(ctx, "שורט: ${s.name}", pid, kind = "export") { js ->
             val cues = if (s.subtitles) s.cues else null
             val effects = VideoExporter.shortEffects(p.width, p.height, s.cropX, cues, s.style, s.startMs)
-            val o = runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}")
+            val o = runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
+            ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(outputUri = o.uri) else it }) }
             addLog(pid, "השורט מוכן ✓ ${o.name}")
         }
     }
@@ -201,8 +204,70 @@ object Jobs {
             val style = com.haessentz.videoeditor.data.SubStyle(posY = 0.85f, sizePct = 4.5f, maxWords = 8)
             val cues = Cues.forClip(p.transcript, 0, p.durationMs, style.maxWords)
             val effects = VideoExporter.subtitleEffects(p.width, p.height, cues, style, 0)
-            val o = runExport(ctx, p, js, listOf(Range(0, p.durationMs)), effects, "${p.name}_כתוביות")
+            val o = runExport(ctx, p, js, listOf(Range(0, p.durationMs)), effects, "${p.name}_כתוביות", kind = "full")
             addLog(pid, "מוכן ✓ ${o.name}")
+        }
+    }
+
+    // ---------------------------------------------------------------- YouTube
+
+    data class UploadPlan(
+        val fileUri: String,
+        val fileName: String,
+        val removed: List<Range>,
+        val fileDurationMs: Long,
+    )
+
+    fun uploadVideo(ctx: Context, pid: String, plan: UploadPlan, token: String): String? {
+        val p = ProjectStore.get(pid) ?: return null
+        val yt = p.youtube
+        return JobManager.enqueue(ctx, "העלאה ליוטיוב: ${yt.title.ifBlank { p.name }}", pid, kind = "upload") { js ->
+            val check = com.haessentz.videoeditor.data.AiImport.finalChapters(yt.chapters, plan.removed, plan.fileDurationMs)
+            val desc = com.haessentz.videoeditor.data.AiImport.buildDescription(yt.description, check.lines)
+            js.progress(0f, "מתחיל העלאה…")
+            val id = com.haessentz.videoeditor.media.YouTubeUploader.upload(
+                ctx, Uri.parse(plan.fileUri),
+                com.haessentz.videoeditor.media.YouTubeUploader.Meta(yt.title.ifBlank { p.name }, desc, yt.privacy),
+                token
+            ) { f, d -> js.progress(f, d) }
+            ProjectStore.update(pid) { pr ->
+                pr.copy(youtube = pr.youtube.copy(lastVideoId = id),
+                    outputs = pr.outputs.map { if (it.uri == plan.fileUri) it.copy(youtubeId = id) else it })
+            }
+            addLog(pid, "הועלה ליוטיוב ✓ https://youtu.be/$id" +
+                    if (yt.privacy == "private") "
+(הסרטון פרטי — אפשר לפרסם אותו מ־YouTube Studio)" else "")
+            val thumbDir = ProjectStore.dir(pid)
+            val thumb = com.haessentz.videoeditor.media.Thumbs.finalFile(thumbDir)
+            if (yt.hasThumb && thumb.exists()) {
+                js.progress(1f, "מעלה תמונה ממוזערת…")
+                val err = withContext(Dispatchers.IO) {
+                    val t = runCatching { com.haessentz.videoeditor.media.YouTubeAuth.silentToken(ctx) }.getOrDefault(token)
+                    com.haessentz.videoeditor.media.YouTubeUploader.setThumbnail(ctx, id, thumb, t)
+                }
+                if (err != null) addLog(pid, err)
+            }
+        }
+    }
+
+    fun uploadShort(ctx: Context, pid: String, shortId: String, token: String): String? {
+        val p = ProjectStore.get(pid) ?: return null
+        val s = p.shorts.firstOrNull { it.id == shortId } ?: return null
+        val uri = s.outputUri ?: return null
+        val title = s.title.ifBlank { s.name }
+        return JobManager.enqueue(ctx, "העלאת שורט: $title", pid, kind = "upload") { js ->
+            val desc = buildString {
+                append(title)
+                if (p.youtube.title.isNotBlank()) append("\n\nמתוך: ").append(p.youtube.title)
+                append("\n\n#shorts")
+            }
+            val id = com.haessentz.videoeditor.media.YouTubeUploader.upload(
+                ctx, Uri.parse(uri),
+                com.haessentz.videoeditor.media.YouTubeUploader.Meta("$title #shorts".take(100), desc, p.youtube.privacy),
+                token
+            ) { f, d -> js.progress(f, d) }
+            ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(youtubeId = id) else it }) }
+            addLog(pid, "השורט הועלה ✓ https://youtube.com/shorts/$id")
         }
     }
 

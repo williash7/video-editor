@@ -78,7 +78,7 @@ object CommandParser {
             val ms = when {
                 tok.hasColon -> tok.ms
                 tok.unit == null -> (tok.rawValue * 60_000).toLong() // default: minutes
-                else -> tok.ms
+                else -> toMs(tok, tok.unit)
             }
             if (ms < 5_000) return Cmd.Error("חלק קצר מדי.")
             return Cmd.Split(ms)
