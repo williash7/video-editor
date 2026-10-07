@@ -258,15 +258,28 @@ object Jobs {
         }
     }
 
+    /**
+     * Uploads one short. The file and the main video's link are read when the job runs,
+     * so this can be queued right after an export or after the main video's upload.
+     */
     fun uploadShort(ctx: Context, pid: String, shortId: String, token: String): String? {
-        val p = ProjectStore.get(pid) ?: return null
-        val s = p.shorts.firstOrNull { it.id == shortId } ?: return null
-        val uri = s.outputUri ?: return null
-        val title = s.title.ifBlank { s.name }
+        val p0 = ProjectStore.get(pid) ?: return null
+        val s0 = p0.shorts.firstOrNull { it.id == shortId } ?: return null
+        val title = s0.title.ifBlank { s0.name }
         return JobManager.enqueue(ctx, "העלאת שורט: $title", pid, kind = "upload") { js ->
+            val p = ProjectStore.get(pid) ?: return@enqueue
+            val s = p.shorts.firstOrNull { it.id == shortId } ?: return@enqueue
+            if (s.youtubeId != null) return@enqueue
+            val uri = s.outputUri ?: throw IllegalStateException("השורט \"$title\" עוד לא יוצא, אז אין מה להעלות.")
+            val mainId = p.youtube.lastVideoId
             val desc = buildString {
                 append(title)
-                if (p.youtube.title.isNotBlank()) append("\n\nמתוך: ").append(p.youtube.title)
+                if (mainId != null) {
+                    append("\n\n▶ השיעור המלא: https://youtu.be/").append(mainId)
+                    if (p.youtube.title.isNotBlank()) append("\n").append(p.youtube.title)
+                } else if (p.youtube.title.isNotBlank()) {
+                    append("\n\nמתוך השיעור: ").append(p.youtube.title)
+                }
                 append("\n\n#shorts")
             }
             val id = com.haessentz.videoeditor.media.YouTubeUploader.upload(
@@ -277,6 +290,17 @@ object Jobs {
             ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(youtubeId = id) else it }) }
             addLog(pid, "השורט הועלה ✓ https://youtube.com/shorts/$id")
         }
+    }
+
+    /** Exports any short that isn't exported yet, then uploads every short that isn't on YouTube yet. */
+    fun uploadAllShorts(ctx: Context, pid: String, token: String): Int {
+        val p = ProjectStore.get(pid) ?: return 0
+        val todo = p.shorts.filter { it.youtubeId == null }
+        todo.forEach { s ->
+            if (s.outputUri == null) exportShort(ctx, pid, s.id)
+            uploadShort(ctx, pid, s.id, token)
+        }
+        return todo.size
     }
 
     fun downloadModel(ctx: Context, modelId: String): String? {

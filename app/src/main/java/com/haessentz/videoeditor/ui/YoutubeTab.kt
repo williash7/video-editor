@@ -259,7 +259,24 @@ fun YoutubeTab(p: Project, player: PlayerState) {
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) { Text(if (uploading) "מעלה… (ההתקדמות בפס למטה)" else "העלה ליוטיוב") }
+                    if (p.shorts.any { it.youtubeId == null } && yt.lastVideoId == null) {
+                        FilledTonalButton(
+                            enabled = !uploading && yt.title.isNotBlank() && yt.title.length <= 100,
+                            onClick = {
+                                val plan = Jobs.UploadPlan(chosen.uri, chosen.label, chosen.removed, chosen.durationMs)
+                                withToken { token ->
+                                    Jobs.uploadVideo(ctx, p.id, plan, token)
+                                    Jobs.uploadAllShorts(ctx, p.id, token)
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("העלה את הסרטון + כל השורטים (${p.shorts.count { it.youtubeId == null }})") }
+                    }
                     if (yt.title.isBlank()) Text("צריך כותרת כדי להעלות.", style = MaterialTheme.typography.bodySmall)
+                    if (yt.lastVideoId != null && p.shorts.any { it.youtubeId != null }) {
+                        Text("לקישור רשמי של שורט לסרטון (\"סרטון קשור\"): לוחצים \"קשר\" ליד השורט, וב־Studio בוחרים את השיעור תחת Related video. יוטיוב לא מאפשר לעשות את זה אוטומטית מאפליקציות.",
+                            style = MaterialTheme.typography.labelSmall)
+                    }
                     yt.lastVideoId?.let { id ->
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { open(ctx, "https://youtu.be/$id") }) { Text("פתח ביוטיוב") }
@@ -275,11 +292,28 @@ fun YoutubeTab(p: Project, player: PlayerState) {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("שורטים", fontWeight = FontWeight.Bold)
+                        Text(
+                            if (yt.lastVideoId != null) "בתיאור של כל שורט יופיע קישור לשיעור המלא."
+                            else "כדאי להעלות קודם את הסרטון הראשי, כדי שבתיאור של כל שורט יופיע קישור אליו.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        val pendingShorts = p.shorts.count { it.youtubeId == null }
+                        if (pendingShorts > 0) {
+                            Button(enabled = !uploading, onClick = { withToken { token -> Jobs.uploadAllShorts(ctx, p.id, token) } },
+                                modifier = Modifier.fillMaxWidth()) {
+                                Text("העלה את כל השורטים ($pendingShorts)")
+                            }
+                            if (p.shorts.any { it.youtubeId == null && it.outputUri == null })
+                                Text("שורטים שעוד לא יוצאו ייוצאו קודם, אוטומטית.", style = MaterialTheme.typography.labelSmall)
+                        }
                         p.shorts.forEach { s ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(s.title.ifBlank { s.name }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
                                 when {
-                                    s.youtubeId != null -> TextButton(onClick = { open(ctx, "https://youtube.com/shorts/${s.youtubeId}") }) { Text("הועלה ✓") }
+                                    s.youtubeId != null -> Row {
+                                        TextButton(onClick = { open(ctx, "https://youtube.com/shorts/${s.youtubeId}") }) { Text("הועלה ✓") }
+                                        if (yt.lastVideoId != null) TextButton(onClick = { open(ctx, "https://studio.youtube.com/video/${s.youtubeId}/edit") }) { Text("קשר") }
+                                    }
                                     s.outputUri == null -> Text("קודם ייצא", style = MaterialTheme.typography.labelSmall)
                                     else -> TextButton(enabled = !uploading, onClick = {
                                         withToken { token -> Jobs.uploadShort(ctx, p.id, s.id, token) }
