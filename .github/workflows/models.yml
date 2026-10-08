@@ -1,0 +1,40 @@
+name: Build quantized Hebrew models
+
+on:
+  push:
+    paths: [".github/workflows/models.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  quantize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build whisper.cpp quantize tool
+        run: |
+          git clone --depth 1 --branch v1.8.7 https://github.com/ggml-org/whisper.cpp
+          cmake -S whisper.cpp -B build -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF
+          cmake --build build --target quantize -j 4
+          ls build/bin
+
+      - name: Download ivrit.ai model
+        run: curl -fL --retry 5 -o ivrit.bin https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin
+
+      - name: Quantize
+        run: |
+          ./build/bin/quantize ivrit.bin ivrit-turbo-q5_0.bin q5_0
+          ./build/bin/quantize ivrit.bin ivrit-turbo-q8_0.bin q8_0
+          ls -la *.bin
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: models-v1
+          name: "מודלים מכווצים (עברית)"
+          body: "מודלי ivrit.ai מכווצים לתמלול מהיר יותר בטלפון. האפליקציה מורידה אותם לבד."
+          files: |
+            ivrit-turbo-q5_0.bin
+            ivrit-turbo-q8_0.bin
+          make_latest: "false"
