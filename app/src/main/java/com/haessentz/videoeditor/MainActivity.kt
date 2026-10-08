@@ -66,6 +66,9 @@ fun AppRoot() {
         LaunchedEffect(Unit) { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }
     }
 
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { com.haessentz.videoeditor.work.Jobs.resumeInterrupted(ctx) }
+
     when (val s = stack.last()) {
         Screen.Home -> HomeScreen(nav)
         Screen.Models -> ModelsScreen(nav)

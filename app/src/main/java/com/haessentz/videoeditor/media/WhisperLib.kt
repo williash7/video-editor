@@ -14,5 +14,5 @@ object WhisperLib {
     external fun freeContext(ptr: Long)
     external fun setAbort(value: Boolean)
     external fun systemInfo(): String
-    external fun transcribe(ptr: Long, pcmPath: String, language: String, threads: Int, maxLen: Int, callback: Callback): Int
+    external fun transcribe(ptr: Long, pcmPath: String, language: String, threads: Int, maxLen: Int, offsetMs: Long, callback: Callback): Int
 }

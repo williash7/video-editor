@@ -229,7 +229,8 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
             OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), placeholder = { Text("חיפוש בתמלול") }, singleLine = true)
             if (!running) TextButton(onClick = { CommandRunner.run(ctx, p.id, "שמור כתוביות") }) { Text("SRT") }
         }
-        if (running) Text("עדיין מתמלל…", Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall)
+        if (running) Text("עדיין מתמלל… מה שכבר תומלל נשמר, גם אם יוצאים מהאפליקציה.", Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall)
+        BatteryCard()
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(8.dp)) {
             items(idxs, key = { it }) { i ->
                 val s = p.transcript[i]
@@ -246,7 +247,10 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
             }
             item {
                 Text("לחיצה = קפיצה לזמן. לחיצה ארוכה = תיקון הטקסט.", Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall)
-                if (!running) OutlinedButton(onClick = { Jobs.transcribe(ctx, p.id) }, Modifier.padding(8.dp)) { Text("תמלל מחדש") }
+                if (!running) {
+                    if (!p.transcribed) Button(onClick = { Jobs.transcribe(ctx, p.id) }, Modifier.padding(8.dp)) { Text("המשך תמלול") }
+                    OutlinedButton(onClick = { Jobs.transcribe(ctx, p.id, fresh = true) }, Modifier.padding(8.dp)) { Text("תמלל מחדש מההתחלה") }
+                }
             }
         }
     }

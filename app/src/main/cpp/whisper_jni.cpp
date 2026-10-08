@@ -84,7 +84,7 @@ Java_com_haessentz_videoeditor_media_WhisperLib_systemInfo(JNIEnv *env, jobject 
 JNIEXPORT jint JNICALL
 Java_com_haessentz_videoeditor_media_WhisperLib_transcribe(JNIEnv *env, jobject /*thiz*/, jlong ptr,
                                                          jstring pcmPath, jstring language,
-                                                         jint threads, jint maxLen, jobject callback) {
+                                                         jint threads, jint maxLen, jlong offsetMs, jobject callback) {
     auto *ctx = reinterpret_cast<whisper_context *>(ptr);
     if (ctx == nullptr) return -100;
 
@@ -126,6 +126,7 @@ Java_com_haessentz_videoeditor_media_WhisperLib_transcribe(JNIEnv *env, jobject 
     p.language = langStr.c_str();
     p.translate = false;
     p.no_context = true;
+    p.offset_ms = (int) offsetMs;
     p.print_progress = false;
     p.print_realtime = false;
     p.print_timestamps = false;

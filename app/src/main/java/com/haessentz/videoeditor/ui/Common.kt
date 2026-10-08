@@ -107,3 +107,36 @@ fun shareVideo(ctx: Context, uri: String) {
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(i, "שתף").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
+
+/** Asks Android not to stop the app in the background (Samsung is aggressive about this). */
+@androidx.compose.runtime.Composable
+fun BatteryCard() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+    var ok by remember { androidx.compose.runtime.mutableStateOf(pm.isIgnoringBatteryOptimizations(ctx.packageName)) }
+    val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycle) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, e ->
+            if (e == androidx.lifecycle.Lifecycle.Event.ON_RESUME) ok = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+        }
+        lifecycle.lifecycle.addObserver(obs)
+        onDispose { lifecycle.lifecycle.removeObserver(obs) }
+    }
+    if (ok) return
+    androidx.compose.material3.Card(
+        Modifier.fillMaxWidth().padding(8.dp),
+        colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer)
+    ) {
+        Column(Modifier.padding(12.dp)) {
+            Text("כדי שהתמלול ימשיך גם כשיוצאים מהאפליקציה", fontWeight = FontWeight.Bold)
+            Text("סמסונג עוצרת אפליקציות ברקע כדי לחסוך סוללה. אשר לאפליקציה לעבוד ברקע ללא הגבלה.",
+                style = MaterialTheme.typography.bodySmall)
+            androidx.compose.material3.Button(onClick = {
+                runCatching {
+                    ctx.startActivity(Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                        .setData(Uri.parse("package:" + ctx.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+            }) { Text("אפשר עבודה ברקע") }
+        }
+    }
+}

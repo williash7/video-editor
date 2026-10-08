@@ -98,6 +98,8 @@ data class Project(
     val createdAt: Long,
     val transcript: List<Seg> = emptyList(),
     val transcribed: Boolean = false,
+    /** A transcription was running; if the app was killed it resumes from the last saved sentence. */
+    val transcribing: Boolean = false,
     val cutList: List<Range> = emptyList(),
     val shorts: List<ShortClip> = emptyList(),
     val outputs: List<OutputFile> = emptyList(),

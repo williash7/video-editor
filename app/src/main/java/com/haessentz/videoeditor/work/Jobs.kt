@@ -48,56 +48,76 @@ object Jobs {
 
     // ---------------------------------------------------------------- transcription
 
-    fun transcribe(ctx: Context, pid: String): String? {
+    /**
+     * Transcribes the project. Progress is saved to disk as it goes, so if the app is closed or killed
+     * the next run continues from the last saved sentence. [fresh] = start over from the beginning.
+     */
+    fun transcribe(ctx: Context, pid: String, fresh: Boolean = false): String? {
         val p = ProjectStore.get(pid) ?: return null
+        if (JobManager.jobs.value.any { it.projectId == pid && it.kind == "transcribe" && it.active }) return null
         val modelId = Prefs.activeModel
+        // mark at once, so a kill even before the job starts still resumes later
+        ProjectStore.update(pid) {
+            if (fresh || it.transcribed) it.copy(transcript = emptyList(), transcribed = false, transcribing = true)
+            else it.copy(transcribing = true)
+        }
         return JobManager.enqueue(ctx, "תמלול: ${p.name}", pid, kind = "transcribe") { js ->
-            if (!ModelManager.isReady(ctx, modelId)) throw IllegalStateException("לא הורד מודל תמלול. היכנס להגדרות ⚙ והורד מודל.")
-            val pcm = ensurePcm(ctx, p, js, 0f, 0.08f)
-            js.progress(0.08f, "טוען את מודל התמלול…")
-            ProjectStore.update(pid) { it.copy(transcript = emptyList(), transcribed = false) }
-            withContext(Dispatchers.IO) {
-                WhisperLib.setAbort(false)
-                js.onCancel { WhisperLib.setAbort(true) }
-                val ctxPtr = WhisperLib.initContext(ModelManager.file(ctx, modelId).absolutePath)
-                if (ctxPtr == 0L) throw IllegalStateException("טעינת המודל נכשלה. אולי הקובץ פגום — נסה למחוק ולהוריד שוב.")
-                js.phase(0.1f, "המודל נטען. מתמלל את הדקה הראשונה… (המשפטים הראשונים יופיעו תוך דקה־שתיים)")
-                val segs = ArrayList<Seg>()
-                var lastSave = System.currentTimeMillis()
-                val duration = p.durationMs.coerceAtLeast(1)
-                try {
-                    val cb = object : WhisperLib.Callback {
-                        override fun onSegment(t0: Long, t1: Long, text: ByteArray) {
-                            val t = String(text, Charsets.UTF_8).trim()
-                            if (t.isEmpty()) return
-                            segs.add(Seg(t0, t1, t))
-                            val f = (t1.toFloat() / duration).coerceIn(0f, 1f)
-                            js.progress(0.1f + 0.9f * f, "מתמלל… ${com.haessentz.videoeditor.data.fmtMs(t1)} מתוך ${com.haessentz.videoeditor.data.fmtMs(duration)}")
-                            val now = System.currentTimeMillis()
-                            if (now - lastSave > 4000) {
-                                lastSave = now
+            try {
+                if (!ModelManager.isReady(ctx, modelId)) throw IllegalStateException("לא הורד מודל תמלול. היכנס להגדרות ⚙ והורד מודל.")
+                val pcm = ensurePcm(ctx, p, js, 0f, 0.08f)
+                js.progress(0.08f, "טוען את מודל התמלול…")
+                val existing = ProjectStore.get(pid)?.transcript ?: emptyList()
+                val resumeMs = existing.lastOrNull()?.endMs ?: 0L
+                if (resumeMs > 0) addLog(pid, "ממשיך את התמלול מ־${com.haessentz.videoeditor.data.fmtMs(resumeMs)} (מה שכבר תומלל נשמר).")
+                withContext(Dispatchers.IO) {
+                    WhisperLib.setAbort(false)
+                    js.onCancel { WhisperLib.setAbort(true) }
+                    val ctxPtr = WhisperLib.initContext(ModelManager.file(ctx, modelId).absolutePath)
+                    if (ctxPtr == 0L) throw IllegalStateException("טעינת המודל נכשלה. אולי הקובץ פגום — נסה למחוק ולהוריד שוב.")
+                    val duration = p.durationMs.coerceAtLeast(1)
+                    val startF = 0.1f + 0.9f * (resumeMs.toFloat() / duration).coerceIn(0f, 1f)
+                    js.phase(startF, "המודל נטען. מתמלל… (המשפטים הבאים יופיעו תוך דקה־שתיים)")
+                    val segs = ArrayList<Seg>(existing)
+                    var lastSave = System.currentTimeMillis()
+                    try {
+                        val cb = object : WhisperLib.Callback {
+                            override fun onSegment(t0: Long, t1: Long, text: ByteArray) {
+                                val t = String(text, Charsets.UTF_8).trim()
+                                if (t.isEmpty() || t1 <= resumeMs) return
+                                segs.add(Seg(t0, t1, t))
+                                val f = (t1.toFloat() / duration).coerceIn(0f, 1f)
+                                js.progress(0.1f + 0.9f * f, "מתמלל… ${com.haessentz.videoeditor.data.fmtMs(t1)} מתוך ${com.haessentz.videoeditor.data.fmtMs(duration)}")
+                                val now = System.currentTimeMillis()
                                 val copy = ArrayList(segs)
-                                ProjectStore.update(pid, save = false) { it.copy(transcript = copy) }
+                                // save to disk every few seconds so nothing is lost if the app is closed
+                                val toDisk = now - lastSave > 8000
+                                if (toDisk) lastSave = now
+                                ProjectStore.update(pid, save = toDisk) { it.copy(transcript = copy) }
                             }
-                        }
 
-                        override fun onProgress(progress: Int) {
-                            if (segs.isEmpty() && progress > 0)
-                                js.progress(0.1f + 0.9f * progress / 100f, "מתמלל… $progress%")
+                            override fun onProgress(progress: Int) {}
                         }
+                        val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, "he", Prefs.threads, 60, resumeMs, cb)
+                        currentCoroutineContext().ensureActive()
+                        if (r != 0) throw IllegalStateException("התמלול נכשל (קוד $r)")
+                    } finally {
+                        WhisperLib.freeContext(ctxPtr)
+                        val final = ArrayList(segs)
+                        ProjectStore.update(pid) { it.copy(transcript = final) }
                     }
-                    val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, "he", Prefs.threads, 60, cb)
-                    currentCoroutineContext().ensureActive()
-                    if (r != 0) throw IllegalStateException("התמלול נכשל (קוד $r)")
-                } finally {
-                    WhisperLib.freeContext(ctxPtr)
-                    val final = ArrayList(segs)
-                    ProjectStore.update(pid) { it.copy(transcript = final) }
+                    ProjectStore.update(pid) { it.copy(transcribed = true) }
+                    addLog(pid, "התמלול הסתיים: ${segs.size} משפטים. עכשיו אפשר לחפש, ליצור שורטים עם כתוביות ועוד.")
                 }
-                ProjectStore.update(pid) { it.copy(transcribed = true) }
-                addLog(pid, "התמלול הסתיים: ${segs.size} משפטים. עכשיו אפשר לחפש, ליצור שורטים עם כתוביות ועוד.")
+            } finally {
+                // reached on finish, error or "בטל" — but not when Android kills the app, so that case resumes
+                ProjectStore.update(pid) { it.copy(transcribing = false) }
             }
         }
+    }
+
+    /** Called when the app opens: continues any transcription that was cut off by the app being closed. */
+    fun resumeInterrupted(ctx: Context) {
+        ProjectStore.projects.value.filter { it.transcribing && !it.transcribed }.forEach { transcribe(ctx, it.id) }
     }
 
     // ---------------------------------------------------------------- exports
