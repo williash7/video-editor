@@ -16,7 +16,7 @@ jobs:
         run: |
           git clone --depth 1 --branch v1.8.7 https://github.com/ggml-org/whisper.cpp
           cmake -S whisper.cpp -B build -DCMAKE_BUILD_TYPE=Release -DWHISPER_BUILD_TESTS=OFF
-          cmake --build build --target quantize -j 4
+          cmake --build build --target whisper-quantize -j 4
           ls build/bin
 
       - name: Download ivrit.ai model
@@ -24,8 +24,8 @@ jobs:
 
       - name: Quantize
         run: |
-          ./build/bin/quantize ivrit.bin ivrit-turbo-q5_0.bin q5_0
-          ./build/bin/quantize ivrit.bin ivrit-turbo-q8_0.bin q8_0
+          ./build/bin/whisper-quantize ivrit.bin ivrit-turbo-q5_0.bin q5_0
+          ./build/bin/whisper-quantize ivrit.bin ivrit-turbo-q8_0.bin q8_0
           ls -la *.bin
 
       - name: Publish

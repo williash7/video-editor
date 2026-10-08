@@ -12,15 +12,27 @@ import kotlin.coroutines.coroutineContext
 data class ModelInfo(val id: String, val title: String, val desc: String, val url: String, val sizeMb: Int)
 
 object ModelManager {
+    private const val REL = "https://github.com/williash7/video-editor/releases/download/models-v1/"
+
     val models = listOf(
         ModelInfo(
-            "ivrit-turbo", "עברית – מדויק (ivrit.ai)",
-            "מאומן במיוחד על עברית. הכי מדויק, אבל איטי יותר. מומלץ.",
+            "ivrit-q5", "עברית – מהיר (ivrit.ai מכווץ) ⭐",
+            "אותו מודל עברית, מכווץ. בערך פי 2 מהיר יותר, וההבדל בדיוק קטן מאוד. מומלץ.",
+            REL + "ivrit-turbo-q5_0.bin", 547
+        ),
+        ModelInfo(
+            "ivrit-q8", "עברית – מאוזן (ivrit.ai)",
+            "כמעט זהה בדיוק למודל המלא, ומהיר ממנו.",
+            REL + "ivrit-turbo-q8_0.bin", 874
+        ),
+        ModelInfo(
+            "ivrit-turbo", "עברית – מלא (ivrit.ai)",
+            "המודל המקורי. הכי מדויק, אבל הכי איטי (בערך פי 3 מאורך הסרטון).",
             "https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin", 1620
         ),
         ModelInfo(
             "turbo-q5", "רב־לשוני – מהיר",
-            "Whisper turbo מכווץ. בערך פי 2 מהיר יותר, פחות מדויק בעברית.",
+            "Whisper turbo מכווץ, לא מאומן במיוחד על עברית. פחות מדויק.",
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", 574
         ),
         ModelInfo(
