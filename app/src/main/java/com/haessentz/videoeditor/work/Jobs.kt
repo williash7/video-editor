@@ -61,6 +61,7 @@ object Jobs {
                 js.onCancel { WhisperLib.setAbort(true) }
                 val ctxPtr = WhisperLib.initContext(ModelManager.file(ctx, modelId).absolutePath)
                 if (ctxPtr == 0L) throw IllegalStateException("טעינת המודל נכשלה. אולי הקובץ פגום — נסה למחוק ולהוריד שוב.")
+                js.phase(0.1f, "המודל נטען. מתמלל את הדקה הראשונה… (המשפטים הראשונים יופיעו תוך דקה־שתיים)")
                 val segs = ArrayList<Seg>()
                 var lastSave = System.currentTimeMillis()
                 val duration = p.durationMs.coerceAtLeast(1)
@@ -80,7 +81,10 @@ object Jobs {
                             }
                         }
 
-                        override fun onProgress(progress: Int) {}
+                        override fun onProgress(progress: Int) {
+                            if (segs.isEmpty() && progress > 0)
+                                js.progress(0.1f + 0.9f * progress / 100f, "מתמלל… $progress%")
+                        }
                     }
                     val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, "he", Prefs.threads, 60, cb)
                     currentCoroutineContext().ensureActive()

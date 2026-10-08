@@ -43,6 +43,9 @@ data class JobInfo(
     val kind: String = "",
     val startedAt: Long = 0L,
     val endedAt: Long = 0L,
+    /** Start of the current phase (time, progress), so the estimate ignores fast earlier phases. */
+    val phaseAt: Long = 0L,
+    val phaseProgress: Float = 0f,
 ) {
     val active get() = status == JobStatus.QUEUED || status == JobStatus.RUNNING
 
@@ -51,9 +54,13 @@ data class JobInfo(
 
     /** Rough remaining time from progress so far; null when it can't be estimated yet. */
     fun remainingMs(now: Long = System.currentTimeMillis()): Long? {
-        val e = elapsedMs(now)
-        if (status != JobStatus.RUNNING || progress < 0.03f || progress >= 1f || e < 5000) return null
-        return (e / progress - e).toLong()
+        if (status != JobStatus.RUNNING || progress < 0f || progress >= 1f) return null
+        val t0 = if (phaseAt > 0) phaseAt else startedAt
+        val p0 = if (phaseAt > 0) phaseProgress else 0f
+        val e = now - t0
+        val done = progress - p0
+        if (t0 == 0L || e < 20_000 || done < 0.02f) return null
+        return (e * (1f - progress) / done).toLong()
     }
 }
 
@@ -67,6 +74,8 @@ fun fmtDuration(ms: Long): String {
 class JobScope(val id: String) {
     fun progress(p: Float, detail: String = "") = JobManager.update(id, p, detail)
     fun onCancel(hook: () -> Unit) = JobManager.setHook(id, hook)
+    /** Starts a new phase: the remaining-time estimate is measured from here. */
+    fun phase(p: Float, detail: String) = JobManager.phase(id, p, detail)
 }
 
 /** Runs long jobs one after another, in the background, with a foreground notification. */
@@ -124,6 +133,9 @@ object JobManager {
     }
 
     fun dismiss(id: String) = modify { list -> list.filter { it.id != id || it.active } }
+
+    fun phase(id: String, progress: Float, detail: String) =
+        set(id) { it.copy(progress = progress, detail = detail, phaseAt = System.currentTimeMillis(), phaseProgress = progress) }
 
     fun update(id: String, progress: Float, detail: String) = set(id) { it.copy(progress = progress, detail = detail) }
     fun setHook(id: String, hook: () -> Unit) { hooks[id] = hook }
