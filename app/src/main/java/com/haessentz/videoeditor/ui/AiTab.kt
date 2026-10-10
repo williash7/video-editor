@@ -190,6 +190,7 @@ private fun shareAsFile(ctx: Context, p: Project) {
     val i = Intent(Intent.ACTION_SEND).setType("text/plain")
         .putExtra(Intent.EXTRA_STREAM, uri)
         .putExtra(Intent.EXTRA_SUBJECT, f.name)
+        .putExtra(Intent.EXTRA_TEXT, "בצע את ההוראות שבראש הקובץ המצורף.")
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
@@ -206,6 +207,7 @@ private fun shareText(ctx: Context, name: String, text: String) {
     val i = Intent(Intent.ACTION_SEND).setType("text/plain")
         .putExtra(Intent.EXTRA_STREAM, uri)
         .putExtra(Intent.EXTRA_SUBJECT, f.name)
+        .putExtra(Intent.EXTRA_TEXT, "בצע את ההוראות שבראש הקובץ המצורף.")
         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
