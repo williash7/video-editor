@@ -60,6 +60,7 @@ import com.haessentz.videoeditor.data.Ranges
 import com.haessentz.videoeditor.data.ShortClip
 import com.haessentz.videoeditor.data.SubStyle
 import com.haessentz.videoeditor.data.fmtMs
+import com.haessentz.videoeditor.data.Seg
 import com.haessentz.videoeditor.work.Jobs
 import com.haessentz.videoeditor.media.MediaSaver
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,8 +88,19 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
         return
     }
     val result = remember(p.aiReply) { AiImport.parse(p.aiReply) }
+    var mode by remember { mutableStateOf(0) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(mode == 0, { mode = 0 }, label = { Text("עריכה ופרסום") })
+                androidx.compose.material3.FilterChip(mode == 1, { mode = 1 }, label = { Text("תיקון תמלול") })
+            }
+        }
+        if (mode == 1) {
+            item { FixSection(p, player) }
+            return@LazyColumn
+        }
         // ---------------- step 1
         item {
             Card(Modifier.fillMaxWidth()) {
@@ -153,15 +165,15 @@ fun AiTab(p: Project, player: PlayerState, onDone: () -> Unit) {
     }
 
     if (editPrompt) {
-        var text by remember { mutableStateOf(Prefs.aiPrompt) }
+        var text by remember { mutableStateOf(Prefs.aiPromptFor(p.language)) }
         AlertDialog(
             onDismissRequest = { editPrompt = false },
             title = { Text("ההוראה לבינה") },
             text = { OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), minLines = 6, maxLines = 14,
                 textStyle = MaterialTheme.typography.bodySmall) },
-            confirmButton = { TextButton(onClick = { Prefs.aiPrompt = text; editPrompt = false }) { Text("שמור") } },
+            confirmButton = { TextButton(onClick = { Prefs.setAiPromptFor(p.language, text); editPrompt = false }) { Text("שמור") } },
             dismissButton = {
-                TextButton(onClick = { Prefs.aiPrompt = AiImport.DEFAULT_PROMPT; editPrompt = false }) { Text("חזור לברירת המחדל") }
+                TextButton(onClick = { Prefs.setAiPromptFor(p.language, null); editPrompt = false }) { Text("חזור לברירת המחדל") }
             }
         )
     }
@@ -182,7 +194,128 @@ private fun shareAsFile(ctx: Context, p: Project) {
     ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
-private fun requestText(p: Project) = Prefs.aiPrompt + "\n\n" + AiImport.transcriptText(p.transcript)
+private fun requestText(p: Project) = Prefs.aiPromptFor(p.language) + "\n\n" + AiImport.transcriptText(p.transcript)
+
+private fun fixText(p: Project) = AiImport.fixPrompt(p.language) + "\n\n" + AiImport.fixLines(p.transcript)
+
+private fun shareText(ctx: Context, name: String, text: String) {
+    val dir = java.io.File(ctx.cacheDir, "share").apply { mkdirs() }
+    val f = java.io.File(dir, name)
+    f.writeText(text, Charsets.UTF_8)
+    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", f)
+    val i = Intent(Intent.ACTION_SEND).setType("text/plain")
+        .putExtra(Intent.EXTRA_STREAM, uri)
+        .putExtra(Intent.EXTRA_SUBJECT, f.name)
+        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+}
+
+/** Rebuilds every short's subtitles from the (corrected) transcript. */
+private fun rebuildShortCues(pr: Project, transcript: List<com.haessentz.videoeditor.data.Seg>) =
+    pr.shorts.map { it.copy(cues = Cues.forClip(transcript, it.startMs, it.endMs, it.style.maxWords)) }
+
+/** Second mode of the AI tab: send the transcript for correction, paste back, preview and apply. */
+@Composable
+fun FixSection(p: Project, player: PlayerState) {
+    val ctx = LocalContext.current
+    var reply by remember(p.id) { mutableStateOf("") }
+    var updateShorts by remember { mutableStateOf(true) }
+    var done by remember { mutableStateOf<String?>(null) }
+    val openReply = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) runCatching { ctx.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }
+            .getOrNull()?.let { reply = it }
+    }
+    val fixes = remember(reply) { AiImport.parseFix(reply) }
+    val changes = remember(fixes, p.transcript) {
+        fixes.filter { (i, t) -> i < p.transcript.size && t != p.transcript[i].text.trim() }
+    }
+    val fname = p.name.replace(Regex("[\\\\/:*?\"<>|]"), "_").take(60) + " - לתיקון.txt"
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text("שלב 1: שולחים לתיקון", fontWeight = FontWeight.Bold)
+                Text(if (p.language == "ru") "הבינה תתקן את הרוסית — דקדוק, סיומות וניסוח — בלי לשנות את התוכן. התיקון יופיע בתמלול ובכתוביות."
+                    else "הבינה תתקן שגיאות זיהוי ופיסוק בלי לשנות את התוכן.", style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { shareText(ctx, fname, fixText(p)) }) { Text("שלח קובץ לבינה") }
+                    FilledTonalButton(onClick = {
+                        done = runCatching { MediaSaver.saveText(ctx, fixText(p), fname, "text/plain"); "נשמר בתיקיית ההורדות: Download/VideoEditor/$fname" }
+                            .getOrElse { "השמירה נכשלה: ${it.message}" }
+                    }) { Text("שמור קובץ") }
+                }
+                Text("${p.transcript.size} שורות. אם התשובה נקטעת באמצע, בקש מהבינה \"המשך\" והדבק גם את ההמשך.",
+                    style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(14.dp)) {
+                Text("שלב 2: מדביקים את התשובה", fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = {
+                        val t = clipboard(ctx).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString() ?: ""
+                        reply = t
+                    }) { Text("הדבק מהלוח") }
+                    FilledTonalButton(onClick = {
+                        val t = clipboard(ctx).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString() ?: ""
+                        reply = reply + "\n" + t
+                    }) { Text("הוסף המשך") }
+                    OutlinedButton(onClick = { openReply.launch(arrayOf("text/*", "application/octet-stream")) }) { Text("טען מקובץ") }
+                }
+                if (reply.isNotBlank()) {
+                    Text("זוהו ${fixes.size} שורות מתוך ${p.transcript.size} · ${changes.size} שונו",
+                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                    if (fixes.isEmpty()) Text("לא זיהיתי שורות עם מספרים בסוגריים, כמו [12]. ודא שהבינה שמרה על המספרים.",
+                        color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (changes.isNotEmpty()) {
+            Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("שלב 3: בדיקה", fontWeight = FontWeight.Bold)
+                    changes.entries.take(40).forEach { (i, t) ->
+                        val seg = p.transcript[i]
+                        Column(Modifier.fillMaxWidth().clickable { player.seek(seg.startMs) }) {
+                            Text("▶ ${fmtMs(seg.startMs)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                            Text(seg.text, style = MaterialTheme.typography.bodySmall,
+                                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                            Text(t, style = MaterialTheme.typography.bodyMedium)
+                        }
+                        HorizontalDivider()
+                    }
+                    if (changes.size > 40) Text("ועוד ${changes.size - 40} שינויים…", style = MaterialTheme.typography.labelSmall)
+                    if (p.shorts.isNotEmpty()) CheckLine("לעדכן גם את הכתוביות בשורטים (תיקונים ידניים בכתוביות יוחלפו)", updateShorts) { updateShorts = it }
+                    Button(onClick = {
+                        ProjectStore.update(p.id) { pr ->
+                            val fixed = pr.transcript.mapIndexed { i, sg -> changes[i]?.let { sg.copy(text = it) } ?: sg }
+                            pr.copy(
+                                transcriptBeforeFix = pr.transcriptBeforeFix.ifEmpty { pr.transcript },
+                                transcript = fixed,
+                                shorts = if (updateShorts) rebuildShortCues(pr, fixed) else pr.shorts,
+                                log = (pr.log + LogEntry(false, "התמלול תוקן: ${changes.size} שורות עודכנו.")).takeLast(200),
+                            )
+                        }
+                        reply = ""
+                        done = "התיקונים הוחלו ✓"
+                    }, Modifier.fillMaxWidth()) { Text("החל ${changes.size} תיקונים") }
+                }
+            }
+        }
+        done?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+        if (p.transcriptBeforeFix.isNotEmpty()) {
+            OutlinedButton(onClick = {
+                ProjectStore.update(p.id) { pr ->
+                    pr.copy(transcript = pr.transcriptBeforeFix, transcriptBeforeFix = emptyList(),
+                        shorts = rebuildShortCues(pr, pr.transcriptBeforeFix))
+                }
+                done = "חזרת לתמלול המקורי."
+            }) { Text("חזור לתמלול המקורי (לפני התיקון)") }
+        }
+    }
+}
 
 @UnstableApi
 @Composable

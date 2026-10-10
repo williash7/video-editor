@@ -61,6 +61,7 @@ import androidx.media3.common.util.UnstableApi
 import com.haessentz.videoeditor.data.AiImport
 import com.haessentz.videoeditor.data.Chapter
 import com.haessentz.videoeditor.data.Project
+import com.haessentz.videoeditor.data.Prefs
 import com.haessentz.videoeditor.data.ProjectStore
 import com.haessentz.videoeditor.data.Range
 import com.haessentz.videoeditor.data.YoutubeMeta
@@ -118,7 +119,7 @@ fun YoutubeTab(p: Project, player: PlayerState) {
     }
     fun withToken(action: (String) -> Unit) {
         pending = action
-        YouTubeAuth.authorize(activity,
+        YouTubeAuth.authorize(activity, Jobs.accountOf(p),
             launch = { sender -> consent.launch(IntentSenderRequest.Builder(sender).build()) },
             onToken = { t -> pending = null; action(t) },
             onError = { m -> pending = null; error = m })
@@ -138,6 +139,26 @@ fun YoutubeTab(p: Project, player: PlayerState) {
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // ---- channel
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("לאיזה ערוץ להעלות", fontWeight = FontWeight.Bold)
+                    val current = Jobs.accountOf(p)
+                    val options = (listOf(Prefs.accountFor("he"), Prefs.accountFor("ru")) + current).distinct()
+                    options.forEach { acc ->
+                        Row(Modifier.fillMaxWidth().clickable { save { it.copy(account = acc) } }, verticalAlignment = Alignment.CenterVertically) {
+                            RadioButton(acc == current, { save { it.copy(account = acc) } })
+                            Text(acc, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Text("ברירת המחדל לפרויקט ב${com.haessentz.videoeditor.media.Langs.name(p.language)}: ${Prefs.accountFor(p.language)}",
+                        style = MaterialTheme.typography.labelSmall)
+                    Text("החשבון צריך להיות מחובר בטלפון (הגדרות ← חשבונות), ומוגדר כמשתמש בדיקה ב־Google Cloud.",
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
         // ---- file
         item {
             Card(Modifier.fillMaxWidth()) {

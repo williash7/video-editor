@@ -9,7 +9,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.coroutines.coroutineContext
 
-data class ModelInfo(val id: String, val title: String, val desc: String, val url: String, val sizeMb: Int)
+/** [langs]: languages this model is good for ("he", "ru"). */
+data class ModelInfo(val id: String, val title: String, val desc: String, val url: String, val sizeMb: Int, val langs: Set<String> = setOf("he"))
+
+/** Languages the app can transcribe. */
+object Langs {
+    val all = listOf("he", "ru")
+    fun name(code: String) = when (code) { "ru" -> "רוסית"; else -> "עברית" }
+    fun flag(code: String) = when (code) { "ru" -> "🇷🇺"; else -> "🇮🇱" }
+}
 
 object ModelManager {
     private const val REL = "https://github.com/williash7/video-editor/releases/download/models-v1/"
@@ -31,14 +39,19 @@ object ModelManager {
             "https://huggingface.co/ivrit-ai/whisper-large-v3-turbo-ggml/resolve/main/ggml-model.bin", 1620
         ),
         ModelInfo(
-            "turbo-q5", "רב־לשוני – מהיר",
-            "Whisper turbo מכווץ, לא מאומן במיוחד על עברית. פחות מדויק.",
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", 574
+            "turbo-q5", "רב־לשוני – מהיר ⭐ לרוסית",
+            "Whisper turbo מכווץ. מצוין לרוסית. לעברית עדיף מודל ivrit.ai.",
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin", 574, setOf("he", "ru")
+        ),
+        ModelInfo(
+            "turbo-q8", "רב־לשוני – מאוזן",
+            "Whisper turbo בדיוק גבוה יותר, קצת יותר איטי מהמהיר.",
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin", 874, setOf("he", "ru")
         ),
         ModelInfo(
             "small-q5", "קטן – לבדיקות בלבד",
-            "מהיר מאוד אבל חלש בעברית. טוב רק כדי לבדוק שהכול עובד.",
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin", 190
+            "מהיר מאוד אבל לא מדויק. טוב רק כדי לבדוק שהכול עובד.",
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin", 190, setOf("he", "ru")
         ),
     )
     const val CUSTOM_ID = "custom"

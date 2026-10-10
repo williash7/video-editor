@@ -62,9 +62,31 @@ object Prefs {
         get() = sp.getString("model", "ivrit-turbo") ?: "ivrit-turbo"
         set(v) = sp.edit().putString("model", v).apply()
 
+    /** The transcription model chosen for a language. */
+    fun modelFor(lang: String): String = if (lang == "ru") sp.getString("model_ru", "turbo-q5") ?: "turbo-q5" else activeModel
+    fun setModelFor(lang: String, id: String) {
+        if (lang == "ru") sp.edit().putString("model_ru", id).apply() else activeModel = id
+    }
+
+    /** The Google account (YouTube channel) uploads go to, per language. */
+    fun accountFor(lang: String): String =
+        sp.getString("acct_$lang", null) ?: if (lang == "ru") "chabadbaaliya.afula@gmail.com" else "haessentz@gmail.com"
+    fun setAccountFor(lang: String, email: String) = sp.edit().putString("acct_$lang", email.trim()).apply()
+
+    var lastLanguage: String
+        get() = sp.getString("lastLang", "he") ?: "he"
+        set(v) = sp.edit().putString("lastLang", v).apply()
+
     var aiPrompt: String
         get() = sp.getString("aiPrompt", null) ?: AiImport.DEFAULT_PROMPT
         set(v) = sp.edit().putString("aiPrompt", v).apply()
+
+    fun aiPromptFor(lang: String): String =
+        if (lang == "ru") sp.getString("aiPromptRu", null) ?: AiImport.DEFAULT_PROMPT_RU else aiPrompt
+    fun setAiPromptFor(lang: String, v: String?) {
+        val key = if (lang == "ru") "aiPromptRu" else "aiPrompt"
+        if (v == null) sp.edit().remove(key).apply() else sp.edit().putString(key, v).apply()
+    }
 
     val defaultThreads: Int get() = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 

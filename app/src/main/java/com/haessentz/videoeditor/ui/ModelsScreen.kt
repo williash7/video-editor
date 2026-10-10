@@ -58,7 +58,8 @@ import com.haessentz.videoeditor.work.Jobs
 fun ModelsScreen(nav: Nav) {
     val ctx = LocalContext.current
     val jobs by JobManager.jobs.collectAsState()
-    var active by remember { mutableStateOf(Prefs.activeModel) }
+    var activeHe by remember { mutableStateOf(Prefs.modelFor("he")) }
+    var activeRu by remember { mutableStateOf(Prefs.modelFor("ru")) }
     var threads by remember { mutableIntStateOf(Prefs.threads) }
     var refresh by remember { mutableIntStateOf(0) }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -68,10 +69,15 @@ fun ModelsScreen(nav: Nav) {
     val ready = remember(jobs, refresh) {
         (ModelManager.models.map { it.id } + ModelManager.CUSTOM_ID).associateWith { ModelManager.isReady(ctx, it) }
     }
-    if (ready[active] != true) {
-        val firstReady = ready.entries.firstOrNull { it.value }?.key
-        if (firstReady != null && firstReady != active) { active = firstReady; Prefs.activeModel = firstReady }
+    fun fix(lang: String, cur: String): String {
+        if (ready[cur] == true) return cur
+        val first = ModelManager.models.firstOrNull { lang in it.langs && ready[it.id] == true }?.id
+            ?: ModelManager.CUSTOM_ID.takeIf { ready[it] == true }
+        if (first != null && first != cur) Prefs.setModelFor(lang, first)
+        return first ?: cur
     }
+    activeHe = fix("he", activeHe)
+    activeRu = fix("ru", activeRu)
 
     Scaffold(
         topBar = {
@@ -93,23 +99,32 @@ fun ModelsScreen(nav: Nav) {
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
-            items(ModelManager.models, key = { it.id }) { m ->
-                val job = jobs.firstOrNull { it.kind == "model:${m.id}" && it.active }
-                ModelCard(
-                    m, ready[m.id] == true, active == m.id, job?.progress, job?.detail,
-                    onSelect = { active = m.id; Prefs.activeModel = m.id },
-                    onDownload = { Jobs.downloadModel(ctx, m.id) },
-                    onCancel = { job?.let { JobManager.cancel(it.id) } },
-                    onDelete = { ModelManager.file(ctx, m.id).delete(); refresh++ }
-                )
+            for (lang in com.haessentz.videoeditor.media.Langs.all) {
+                item(key = "head-$lang") {
+                    Text("${com.haessentz.videoeditor.media.Langs.flag(lang)} תמלול ב${com.haessentz.videoeditor.media.Langs.name(lang)}",
+                        style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = 8.dp))
+                }
+                val list = ModelManager.models.filter { lang in it.langs && !(lang == "he" && it.id == "small-q5") }
+                items(list, key = { "$lang-${it.id}" }) { m ->
+                    val job = jobs.firstOrNull { it.kind == "model:${m.id}" && it.active }
+                    val sel = if (lang == "ru") activeRu else activeHe
+                    ModelCard(
+                        m, ready[m.id] == true, sel == m.id, job?.progress, job?.detail,
+                        onSelect = { Prefs.setModelFor(lang, m.id); if (lang == "ru") activeRu = m.id else activeHe = m.id },
+                        onDownload = { Jobs.downloadModel(ctx, m.id) },
+                        onCancel = { job?.let { JobManager.cancel(it.id) } },
+                        onDelete = { ModelManager.file(ctx, m.id).delete(); refresh++ }
+                    )
+                }
             }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (ready[ModelManager.CUSTOM_ID] == true) {
-                                RadioButton(selected = active == ModelManager.CUSTOM_ID, onClick = {
-                                    active = ModelManager.CUSTOM_ID; Prefs.activeModel = ModelManager.CUSTOM_ID
+                                RadioButton(selected = activeHe == ModelManager.CUSTOM_ID, onClick = {
+                                    activeHe = ModelManager.CUSTOM_ID; Prefs.activeModel = ModelManager.CUSTOM_ID
                                 })
                             }
                             Text("מודל מקובץ בטלפון", fontWeight = FontWeight.Bold)

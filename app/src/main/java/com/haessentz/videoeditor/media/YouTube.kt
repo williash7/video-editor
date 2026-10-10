@@ -35,13 +35,14 @@ import java.nio.ByteBuffer
 object YouTubeAuth {
     private const val SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 
-    private fun request() = AuthorizationRequest.builder()
+    private fun request(account: String?) = AuthorizationRequest.builder()
         .setRequestedScopes(listOf(Scope(SCOPE)))
+        .apply { if (!account.isNullOrBlank()) setAccount(android.accounts.Account(account, "com.google")) }
         .build()
 
     /** Interactive: may need to show Google's consent screen via [launch]. */
-    fun authorize(activity: Activity, launch: (android.content.IntentSender) -> Unit, onToken: (String) -> Unit, onError: (String) -> Unit) {
-        Identity.getAuthorizationClient(activity).authorize(request())
+    fun authorize(activity: Activity, account: String?, launch: (android.content.IntentSender) -> Unit, onToken: (String) -> Unit, onError: (String) -> Unit) {
+        Identity.getAuthorizationClient(activity).authorize(request(account))
             .addOnSuccessListener { res ->
                 val pi = res.pendingIntent
                 if (res.hasResolution() && pi != null) launch(pi.intentSender)
@@ -56,8 +57,8 @@ object YouTubeAuth {
     }.getOrNull()
 
     /** Background refresh (works once the user has already agreed). Must not run on the main thread. */
-    fun silentToken(ctx: Context): String {
-        val res = Tasks.await(Identity.getAuthorizationClient(ctx).authorize(request()))
+    fun silentToken(ctx: Context, account: String?): String {
+        val res = Tasks.await(Identity.getAuthorizationClient(ctx).authorize(request(account)))
         if (res.hasResolution()) throw YouTubeException("צריך להתחבר מחדש לגוגל — לחץ שוב על העלאה")
         return res.accessToken ?: throw YouTubeException("לא התקבלה הרשאה מגוגל")
     }
@@ -68,6 +69,8 @@ object YouTubeAuth {
             m.contains("10:") || m.contains("DEVELOPER_ERROR") ->
                 "ההגדרה ב־Google Cloud עדיין לא הושלמה (חסר מזהה OAuth לאנדרואיד עם טביעת האצבע של האפליקציה)."
             m.contains("12501") || m.contains("anceled") -> "ההתחברות בוטלה."
+            m.contains("ccount", ignoreCase = true) ->
+                "החשבון שנבחר לערוץ לא נמצא בטלפון. הוסף אותו בהגדרות הטלפון ← חשבונות ← הוסף חשבון ← Google, ונסה שוב."
             else -> "שגיאת התחברות לגוגל: $m"
         }
     }
@@ -89,6 +92,7 @@ object YouTubeUploader {
         video: Uri,
         meta: Meta,
         firstToken: String,
+        account: String?,
         onProgress: (Float, String) -> Unit,
     ): String {
         var token = firstToken
@@ -135,7 +139,7 @@ object YouTubeUploader {
                     val code = c.responseCode
                     when {
                         code == 200 || code == 201 -> session = c.getHeaderField("Location") ?: throw IOException("יוטיוב לא החזיר כתובת העלאה")
-                        code == 401 -> { token = YouTubeAuth.silentToken(ctx); attempt++ }
+                        code == 401 -> { token = YouTubeAuth.silentToken(ctx, account); attempt++ }
                         code >= 500 -> { attempt++; delay(3000L * attempt) }
                         else -> throw apiError(c, code)
                     }
@@ -185,7 +189,7 @@ object YouTubeUploader {
                             onProgress(offset.toFloat() / total,
                                 "${offset / 1_000_000} / ${total / 1_000_000} MB · ${String.format(java.util.Locale.US, "%.1f", mbps)} MB/s")
                         }
-                        401 -> { token = YouTubeAuth.silentToken(ctx); offset = queryOffset(session, total, token) }
+                        401 -> { token = YouTubeAuth.silentToken(ctx, account); offset = queryOffset(session, total, token) }
                         in 500..599 -> { failures++; delay(minOf(60_000L, 2000L * failures)); offset = queryOffset(session, total, token) }
                         else -> throw apiError(c, code)
                     }

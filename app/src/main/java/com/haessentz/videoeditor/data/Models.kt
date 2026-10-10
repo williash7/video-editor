@@ -78,6 +78,8 @@ data class YoutubeMeta(
     val thumbTextTop: Boolean = false,
     val hasThumb: Boolean = false,
     val lastVideoId: String? = null,
+    /** Google account of the channel to upload to; empty = the default for the project's language. */
+    val account: String = "",
 )
 
 @Serializable
@@ -98,6 +100,10 @@ data class Project(
     val createdAt: Long,
     val transcript: List<Seg> = emptyList(),
     val transcribed: Boolean = false,
+    /** Spoken language: "he" or "ru". */
+    val language: String = "he",
+    /** The transcript before an AI correction was applied, so it can be restored. */
+    val transcriptBeforeFix: List<Seg> = emptyList(),
     /** A transcription was running; if the app was killed it resumes from the last saved sentence. */
     val transcribing: Boolean = false,
     val cutList: List<Range> = emptyList(),

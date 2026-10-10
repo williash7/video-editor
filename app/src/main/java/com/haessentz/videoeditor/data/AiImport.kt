@@ -30,6 +30,70 @@ object AiImport {
 התמלול:
 """.trim()
 
+    /** Same request for a lesson in Russian: headers stay in Hebrew (so the app can read them), content in Russian. */
+    val DEFAULT_PROMPT_RU = """
+להלן תמלול של סרטון ברוסית, עם זמן בתחילת כל שורה.
+אנא החזר תשובה בדיוק בתבנית הבאה. את הכותרות המסומנות ב־### השאר בדיוק כפי שהן כתובות כאן (בעברית), אבל את כל התוכן — כותרת, תיאור, שמות השורטים ושמות הפרקים — כתוב ברוסית תקנית. בלי טקסט נוסף לפני או אחרי:
+
+### מחיקה
+(קטעים מיותרים למחיקה: היסוסים, הפסקות ארוכות, חזרות, טעויות, דיבור שלא שייך לנושא. שורה לכל קטע)
+מ:שש-מ:שש | סיבה קצרה
+
+### שורטים
+(3 עד 5 קטעים חזקים של 30 עד 60 שניות, שמובנים גם בלי הקשר)
+מ:שש-מ:שש | כותרת לשורט ברוסית
+
+### כותרת
+כותרת אחת מושכת לסרטון, ברוסית
+
+### תיאור
+תיאור של 2 עד 4 משפטים, ברוסית
+
+### פרקים
+0:00 שם הפרק ברוסית
+מ:שש שם הפרק ברוסית
+
+כללים: כל הזמנים בפורמט דקות:שניות (או שעות:דקות:שניות), לפי הזמנים בתמלול המקורי. בפרקים: לפחות 3 פרקים, הראשון ב־0:00.
+
+התמלול:
+""".trim()
+
+    // ------------------------------------------------------------ transcript correction
+
+    fun fixPrompt(lang: String): String {
+        val l = if (lang == "ru") "רוסית" else "עברית"
+        val extra = if (lang == "ru")
+            "הדובר אינו דובר רוסית ילידי, לכן תקן גם דקדוק, סיומות, סדר מילים וניסוח, כך שכל שורה תהיה ברוסית תקנית וטבעית. שמור על המונחים היהודיים (למשל Тора, Ребе, хасидут) כפי שהם."
+        else "תקן שגיאות זיהוי, מילים שנשמעו לא נכון ופיסוק."
+        return """
+להלן תמלול אוטומטי של שיעור ב$l. כל שורה מתחילה במספר בסוגריים מרובעים, למשל [12].
+$extra
+אל תשנה את התוכן ואל תוסיף דברים שלא נאמרו.
+חשוב מאוד: השאר כל מספר בדיוק כפי שהוא, שורה אחת לכל מספר, באותו סדר. אל תאחד ואל תפצל שורות, ואל תדלג על שורות.
+החזר רק את השורות המתוקנות, בלי הסברים לפני או אחרי.
+
+התמלול:
+""".trim()
+    }
+
+    fun fixLines(transcript: List<Seg>): String =
+        transcript.mapIndexed { i, s -> "[${i + 1}] ${s.text.trim()}" }.joinToString("\n")
+
+    private val fixRe = Regex("""\[(\d{1,5})\]""")
+
+    /** Parses "[n] text" pieces (works even if line breaks were lost). Returns index (0-based) -> text. */
+    fun parseFix(reply: String): Map<Int, String> {
+        val ms = fixRe.findAll(reply).toList()
+        val out = LinkedHashMap<Int, String>()
+        ms.forEachIndexed { i, m ->
+            val end = if (i + 1 < ms.size) ms[i + 1].range.first else reply.length
+            val t = reply.substring(m.range.last + 1, end).replace("**", "").trim()
+            val n = m.groupValues[1].toInt() - 1
+            if (t.isNotEmpty() && n >= 0 && n !in out) out[n] = t
+        }
+        return out
+    }
+
     /** Transcript as "[m:ss] text" lines, merging short segments into readable lines. */
     fun transcriptText(transcript: List<Seg>): String {
         val sb = StringBuilder()
@@ -86,6 +150,11 @@ object AiImport {
         if (!isMarked && !(t.endsWith(":") || (t.contains(':') && shortHead) || t.split(' ').size <= 2)) return null
         val h = head.lowercase()
         val sec = when {
+            h.contains("удал") || h.contains("вырез") -> Sec.DELETE
+            h.contains("шорт") -> Sec.SHORTS
+            h.contains("глав") || h.contains("тайм") -> Sec.CHAPTERS
+            h.contains("заголов") || h.contains("назван") -> Sec.TITLE
+            h.contains("описан") -> Sec.DESC
             h.contains("מחיק") || h.contains("למחוק") || h.contains("להסיר") || h.contains("הסרה") || h.contains("מיותר") || h.contains("להוציא") -> Sec.DELETE
             h.contains("שורט") || h.contains("short") || h.contains("רילס") -> Sec.SHORTS
             h.contains("פרק") || h.contains("chapter") -> Sec.CHAPTERS

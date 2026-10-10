@@ -55,7 +55,8 @@ object Jobs {
     fun transcribe(ctx: Context, pid: String, fresh: Boolean = false): String? {
         val p = ProjectStore.get(pid) ?: return null
         if (JobManager.jobs.value.any { it.projectId == pid && it.kind == "transcribe" && it.active }) return null
-        val modelId = Prefs.activeModel
+        val lang = p.language
+        val modelId = Prefs.modelFor(lang)
         // mark at once, so a kill even before the job starts still resumes later
         ProjectStore.update(pid) {
             if (fresh || it.transcribed) it.copy(transcript = emptyList(), transcribed = false, transcribing = true)
@@ -63,7 +64,7 @@ object Jobs {
         }
         return JobManager.enqueue(ctx, "תמלול: ${p.name}", pid, kind = "transcribe") { js ->
             try {
-                if (!ModelManager.isReady(ctx, modelId)) throw IllegalStateException("לא הורד מודל תמלול. היכנס להגדרות ⚙ והורד מודל.")
+                if (!ModelManager.isReady(ctx, modelId)) throw IllegalStateException("לא הורד מודל תמלול ל${com.haessentz.videoeditor.media.Langs.name(lang)}. היכנס להגדרות ⚙ והורד מודל.")
                 val pcm = ensurePcm(ctx, p, js, 0f, 0.08f)
                 js.progress(0.08f, "טוען את מודל התמלול…")
                 val existing = ProjectStore.get(pid)?.transcript ?: emptyList()
@@ -97,7 +98,7 @@ object Jobs {
 
                             override fun onProgress(progress: Int) {}
                         }
-                        val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, "he", Prefs.threads, 60, resumeMs, cb)
+                        val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, lang, Prefs.threads, 60, resumeMs, cb)
                         currentCoroutineContext().ensureActive()
                         if (r != 0) throw IllegalStateException("התמלול נכשל (קוד $r)")
                     } finally {
@@ -251,9 +252,12 @@ object Jobs {
         val fileDurationMs: Long,
     )
 
+    fun accountOf(p: Project): String = p.youtube.account.ifBlank { Prefs.accountFor(p.language) }
+
     fun uploadVideo(ctx: Context, pid: String, plan: UploadPlan, token: String): String? {
         val p = ProjectStore.get(pid) ?: return null
         val yt = p.youtube
+        val account = accountOf(p)
         return JobManager.enqueue(ctx, "העלאה ליוטיוב: ${yt.title.ifBlank { p.name }}", pid, kind = "upload") { js ->
             val check = com.haessentz.videoeditor.data.AiImport.finalChapters(yt.chapters, plan.removed, plan.fileDurationMs)
             val desc = com.haessentz.videoeditor.data.AiImport.buildDescription(yt.description, check.lines)
@@ -261,7 +265,7 @@ object Jobs {
             val id = com.haessentz.videoeditor.media.YouTubeUploader.upload(
                 ctx, Uri.parse(plan.fileUri),
                 com.haessentz.videoeditor.media.YouTubeUploader.Meta(yt.title.ifBlank { p.name }, desc, yt.privacy),
-                token
+                token, account
             ) { f, d -> js.progress(f, d) }
             ProjectStore.update(pid) { pr ->
                 pr.copy(youtube = pr.youtube.copy(lastVideoId = id),
@@ -274,7 +278,7 @@ object Jobs {
             if (yt.hasThumb && thumb.exists()) {
                 js.progress(1f, "מעלה תמונה ממוזערת…")
                 val err = withContext(Dispatchers.IO) {
-                    val t = runCatching { com.haessentz.videoeditor.media.YouTubeAuth.silentToken(ctx) }.getOrDefault(token)
+                    val t = runCatching { com.haessentz.videoeditor.media.YouTubeAuth.silentToken(ctx, account) }.getOrDefault(token)
                     com.haessentz.videoeditor.media.YouTubeUploader.setThumbnail(ctx, id, thumb, t)
                 }
                 if (err != null) addLog(pid, err)
@@ -309,7 +313,7 @@ object Jobs {
             val id = com.haessentz.videoeditor.media.YouTubeUploader.upload(
                 ctx, Uri.parse(uri),
                 com.haessentz.videoeditor.media.YouTubeUploader.Meta("$title #shorts".take(100), desc, p.youtube.privacy),
-                token
+                token, accountOf(p)
             ) { f, d -> js.progress(f, d) }
             ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(youtubeId = id) else it }) }
             addLog(pid, "השורט הועלה ✓ https://youtube.com/shorts/$id")
@@ -333,7 +337,7 @@ object Jobs {
             withContext(Dispatchers.IO) {
                 ModelManager.download(ctx, info) { f, d -> js.progress(f, d) }
             }
-            if (!ModelManager.isReady(ctx, Prefs.activeModel)) Prefs.activeModel = modelId
+            info.langs.forEach { l -> if (!ModelManager.isReady(ctx, Prefs.modelFor(l))) Prefs.setModelFor(l, modelId) }
         }
     }
 

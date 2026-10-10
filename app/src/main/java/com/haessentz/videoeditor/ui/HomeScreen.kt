@@ -102,7 +102,7 @@ fun HomeScreen(nav: Nav) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (!ModelManager.isReady(ctx, Prefs.activeModel)) {
+            if (!ModelManager.isReady(ctx, Prefs.modelFor("he")) && !ModelManager.isReady(ctx, Prefs.modelFor("ru"))) {
                 item {
                     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                         Column(Modifier.padding(16.dp)) {
@@ -130,6 +130,7 @@ fun HomeScreen(nav: Nav) {
                             Text(p.name, fontWeight = FontWeight.Bold, maxLines = 2)
                             Spacer(Modifier.height(2.dp))
                             val status = buildList {
+                                add(com.haessentz.videoeditor.media.Langs.flag(p.language))
                                 add(fmtMs(p.durationMs))
                                 add(if (p.transcribed) "מתומלל ✓" else if (p.transcript.isNotEmpty()) "תמלול חלקי" else "לא מתומלל")
                                 if (p.shorts.isNotEmpty()) add("${p.shorts.size} שורטים")
@@ -179,6 +180,7 @@ private fun createProject(ctx: Context, uri: Uri): Project {
         val p = Project(
             id = UUID.randomUUID().toString(), name = name, videoUri = uri.toString(),
             durationMs = dur, width = w, height = h, createdAt = System.currentTimeMillis(),
+            language = Prefs.lastLanguage,
             log = listOf(com.haessentz.videoeditor.data.LogEntry(false, "הסרטון נטען (${fmtMs(dur)}). כתוב פקודה, או \"עזרה\" לרשימת הפקודות."))
         )
         ProjectStore.put(p)

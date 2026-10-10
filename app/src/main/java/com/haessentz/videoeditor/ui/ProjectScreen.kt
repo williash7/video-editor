@@ -203,7 +203,8 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
     val running = jobs.any { it.projectId == p.id && it.kind == "transcribe" && it.active }
     var filter by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<Int?>(null) }
-    val modelReady = ModelManager.isReady(ctx, Prefs.activeModel)
+    val modelId = Prefs.modelFor(p.language)
+    val modelReady = ModelManager.isReady(ctx, modelId)
 
     if (p.transcript.isEmpty()) {
         Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -211,10 +212,20 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
                 Text("מתמלל… ההתקדמות מופיעה בפס למטה. המשפטים יופיעו כאן תוך כדי.")
             } else {
                 Text("הסרטון עוד לא תומלל. התמלול נעשה על הטלפון בלבד, בלי אינטרנט.")
-                Text("מודל: ${ModelManager.title(Prefs.activeModel)}${if (modelReady) "" else " (לא הורד)"}", style = MaterialTheme.typography.bodySmall)
+                Text("באיזו שפה מדברים בסרטון?", fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    com.haessentz.videoeditor.media.Langs.all.forEach { l ->
+                        androidx.compose.material3.FilterChip(
+                            selected = p.language == l,
+                            onClick = { Prefs.lastLanguage = l; ProjectStore.update(p.id) { it.copy(language = l) } },
+                            label = { Text("${com.haessentz.videoeditor.media.Langs.flag(l)} ${com.haessentz.videoeditor.media.Langs.name(l)}") })
+                    }
+                }
+                Text("מודל: ${ModelManager.title(modelId)}${if (modelReady) "" else " (לא הורד)"}", style = MaterialTheme.typography.bodySmall)
                 if (modelReady) Button(onClick = { Jobs.transcribe(ctx, p.id) }) { Text("תמלל עכשיו") }
                 else Button(onClick = { nav.go(Screen.Models) }) { Text("להורדת מודל") }
-                Text("טיפ: בסרטון של שעה זה לוקח בערך חצי שעה. כדאי לחבר למטען.", style = MaterialTheme.typography.bodySmall)
+                Text("טיפ: כדאי לחבר למטען. מה שמתומלל נשמר תוך כדי, גם אם יוצאים מהאפליקציה.", style = MaterialTheme.typography.bodySmall)
+                BatteryCard()
             }
         }
         return
