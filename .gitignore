@@ -6,3 +6,4 @@ local.properties
 .idea/
 *.iml
 app/src/main/cpp/whisper.cpp/
+app/src/main/res/font/

@@ -4,6 +4,7 @@ package com.haessentz.videoeditor.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -112,12 +113,19 @@ fun ProjectScreen(pid: String, nav: Nav) {
     val source = if (showEdited && edited != null) edited else null
     val player = rememberPlayer(source?.uri ?: p.videoUri, source?.removed ?: emptyList())
     var tab by remember { mutableIntStateOf(0) }
-    val tabs = listOf("פקודות", "תמלול", "בינה", "רשימת חיתוך", "שורטים", "יוטיוב", "קבצים")
+    val tabs = listOf("⌨ פקודות", "📝 תמלול", "✨ בינה", "✂ חיתוך", "📱 שורטים", "▶ יוטיוב", "📁 קבצים")
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                title = {
+                    Column {
+                        Text(p.name, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium)
+                        Text("${com.haessentz.videoeditor.media.Langs.flag(p.language)} ${fmtMs(p.durationMs)}" +
+                                (if (p.transcribed) " · מתומלל" else "") + (if (p.shorts.isNotEmpty()) " · ${p.shorts.size} שורטים" else ""),
+                            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
                 navigationIcon = { IconButton(onClick = { nav.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "חזרה") } }
             )
         },
@@ -140,8 +148,14 @@ fun ProjectScreen(pid: String, nav: Nav) {
                 }
             }
             TimelineBar(p, player)
-            ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
-                tabs.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
+            ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp, containerColor = MaterialTheme.colorScheme.surface,
+                divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }) {
+                tabs.forEachIndexed { i, t ->
+                    Tab(selected = tab == i, onClick = { tab = i },
+                        selectedContentColor = MaterialTheme.colorScheme.primary,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = { Text(t, style = MaterialTheme.typography.labelLarge) })
+                }
             }
             Box(Modifier.weight(1f)) {
                 when (tab) {
@@ -183,10 +197,12 @@ private fun CommandsTab(p: Project, player: PlayerState) {
                     Column(
                         Modifier.widthIn(max = 320.dp)
                             .background(
-                                if (e.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                                RoundedCornerShape(14.dp)
+                                if (e.fromUser) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                if (e.fromUser) RoundedCornerShape(18.dp, 18.dp, 18.dp, 4.dp) else RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)
                             )
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                            .then(if (e.fromUser) Modifier else Modifier.border(1.dp, MaterialTheme.colorScheme.outlineVariant,
+                                RoundedCornerShape(18.dp, 18.dp, 4.dp, 18.dp)))
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(e.text, style = MaterialTheme.typography.bodyMedium)
                         if (e.hits.isNotEmpty()) {

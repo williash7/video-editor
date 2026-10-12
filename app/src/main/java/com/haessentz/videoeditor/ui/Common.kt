@@ -32,6 +32,7 @@ import com.haessentz.videoeditor.work.fmtDuration
 import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,7 +52,8 @@ fun JobsBar(projectId: String? = null) {
     LaunchedEffect(active?.id) {
         while (true) { now = System.currentTimeMillis(); delay(1000) }
     }
-    Surface(tonalElevation = 3.dp, color = MaterialTheme.colorScheme.surfaceVariant) {
+    Surface(tonalElevation = 3.dp, shadowElevation = 8.dp, color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)) {
         Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp)) {
             if (active != null) {
                 val queued = relevant.count { it.active } - 1
@@ -76,8 +78,10 @@ fun JobsBar(projectId: String? = null) {
                     TextButton(onClick = { JobManager.cancel(active.id) }) { Text("בטל") }
                 }
                 Spacer(Modifier.height(4.dp))
-                if (active.progress >= 0f) LinearProgressIndicator(progress = { active.progress }, modifier = Modifier.fillMaxWidth())
-                else LinearProgressIndicator(Modifier.fillMaxWidth())
+                val barMod = Modifier.fillMaxWidth().height(6.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(50))
+                if (active.progress >= 0f) LinearProgressIndicator(progress = { active.progress }, modifier = barMod,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant, strokeCap = androidx.compose.ui.graphics.StrokeCap.Round)
+                else LinearProgressIndicator(barMod, trackColor = MaterialTheme.colorScheme.surfaceVariant)
             }
             if (failed != null) {
                 Row(
