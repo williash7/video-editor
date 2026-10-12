@@ -196,7 +196,7 @@ private fun shareAsFile(ctx: Context, p: Project) {
 }
 
 private fun requestText(p: Project) =
-    AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language) + "\n\n" + AiImport.transcriptText(p.transcript)
+    AiImport.withShortsGuide(AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language)) + "\n\n" + AiImport.transcriptText(p.transcript)
 
 private fun fixText(p: Project) = AiImport.fixPrompt(p.language) + "\n\n" + AiImport.fixLines(p.transcript)
 
