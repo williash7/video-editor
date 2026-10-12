@@ -139,6 +139,8 @@ fun YoutubeTab(p: Project, player: PlayerState) {
     }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // ---- series & lesson number
+        item { SeriesCard(p) }
         // ---- channel
         item {
             Card(Modifier.fillMaxWidth()) {
@@ -382,3 +384,51 @@ private fun open(ctx: android.content.Context, url: String) {
 
 @Composable
 private fun HorizontalDividerCompat() = androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 6.dp))
+
+/** Which weekly series this lesson belongs to and its number; the title ending and Spotify numbers follow from it. */
+@Composable
+private fun SeriesCard(p: Project) {
+    val ctx = LocalContext.current
+    fun set(series: String, no: Int) = ProjectStore.update(p.id) {
+        it.copy(series = series, lessonNo = no,
+            youtube = it.youtube.copy(title = if (it.youtube.title.isBlank()) it.youtube.title
+                else com.haessentz.videoeditor.data.Series.withSuffix(it.youtube.title, series, no)))
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("סדרה ומספר שיעור", fontWeight = FontWeight.Bold)
+            if (p.recordedAt > 0) Text("הוקלט ב־${com.haessentz.videoeditor.data.Series.dateText(p.recordedAt)}",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.haessentz.videoeditor.data.Series.all.forEach { si ->
+                    FilterChip(p.series == si.name, {
+                        set(si.name, if (p.series == si.name) p.lessonNo else Prefs.lastLessonNo(si.name) + 1)
+                    }, label = { Text("${si.dayName}: ${si.name}") })
+                }
+                FilterChip(p.series.isBlank(), { set("", 0) }, label = { Text("ללא סדרה") })
+            }
+            if (p.series.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("שיעור מספר", Modifier.weight(1f))
+                    IconButton(onClick = { set(p.series, (p.lessonNo - 1).coerceAtLeast(1)) }) { Text("−", style = MaterialTheme.typography.titleLarge) }
+                    Text("${p.lessonNo}", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { set(p.series, p.lessonNo + 1) }) { Text("+", style = MaterialTheme.typography.titleLarge) }
+                }
+                Text("הכותרת תסתיים ב: | ${com.haessentz.videoeditor.data.Series.suffix(p.series, p.lessonNo)}",
+                    style = MaterialTheme.typography.bodySmall)
+                com.haessentz.videoeditor.data.Series.byName(p.series)?.let { si ->
+                    val sp = "עונה ${si.season} · פרק ${p.lessonNo}"
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🎧 ספוטיפיי: $sp", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = {
+                            val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("ספוטיפיי", sp))
+                        }) { Text("העתק") }
+                    }
+                }
+                Text("המספר נקבע לפי השיעור האחרון שפורסם בסדרה (הגדרות ⚙). אחרי העלאה ליוטיוב הוא מתעדכן לבד.",
+                    style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}

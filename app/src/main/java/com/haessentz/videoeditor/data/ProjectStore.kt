@@ -73,6 +73,10 @@ object Prefs {
         sp.getString("acct_$lang", null) ?: if (lang == "ru") "chabadbaaliya.afula@gmail.com" else "haessentz@gmail.com"
     fun setAccountFor(lang: String, email: String) = sp.edit().putString("acct_$lang", email.trim()).apply()
 
+    /** The last lesson number published in a series. */
+    fun lastLessonNo(series: String): Int = sp.getInt("lesson_$series", 0)
+    fun setLastLessonNo(series: String, n: Int) = sp.edit().putInt("lesson_$series", n.coerceAtLeast(0)).apply()
+
     var lastLanguage: String
         get() = sp.getString("lastLang", "he") ?: "he"
         set(v) = sp.edit().putString("lastLang", v).apply()

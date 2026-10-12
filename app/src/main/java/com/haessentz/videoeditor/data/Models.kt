@@ -117,6 +117,11 @@ data class Project(
     val transcribed: Boolean = false,
     /** Spoken language: "he" or "ru". */
     val language: String = "he",
+    /** Weekly series (e.g. "עין יעקב") and lesson number in it; empty / 0 = none. */
+    val series: String = "",
+    val lessonNo: Int = 0,
+    /** When the lesson was recorded (decides the series by weekday). */
+    val recordedAt: Long = 0,
     /** The transcript before an AI correction was applied, so it can be restored. */
     val transcriptBeforeFix: List<Seg> = emptyList(),
     /** A transcription was running; if the app was killed it resumes from the last saved sentence. */

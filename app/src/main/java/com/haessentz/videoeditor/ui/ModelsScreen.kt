@@ -135,6 +135,7 @@ fun ModelsScreen(nav: Nav) {
                     }
                 }
             }
+            item { SeriesCounters() }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
@@ -189,6 +190,30 @@ private fun ModelCard(
                 else -> Row {
                     Button(onClick = onDownload) { Text("הורד") }
                     Spacer(Modifier.width(8.dp))
+                }
+            }
+        }
+    }
+}
+
+/** The last published lesson number in each weekly series; new projects continue from it. */
+@Composable
+private fun SeriesCounters() {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp)) {
+            Text("סדרות השיעורים", fontWeight = FontWeight.Bold)
+            Text("לכל סדרה: מספר השיעור האחרון שכבר פורסם. סרטון חדש מקבל אוטומטית את הסדרה לפי יום ההקלטה, ואת המספר הבא.",
+                style = MaterialTheme.typography.bodySmall)
+            com.haessentz.videoeditor.data.Series.all.forEach { si ->
+                var n by remember { mutableIntStateOf(Prefs.lastLessonNo(si.name)) }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(si.name)
+                        Text("יום ${si.dayName} · עונה ${si.season} בספוטיפיי", style = MaterialTheme.typography.labelSmall)
+                    }
+                    IconButton(onClick = { n = (n - 1).coerceAtLeast(0); Prefs.setLastLessonNo(si.name, n) }) { Text("−", style = MaterialTheme.typography.titleLarge) }
+                    Text("$n", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { n += 1; Prefs.setLastLessonNo(si.name, n) }) { Text("+", style = MaterialTheme.typography.titleLarge) }
                 }
             }
         }

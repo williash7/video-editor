@@ -155,6 +155,33 @@ ${(check(lang))}
         return out
     }
 
+    /** Series, lesson number, title format and the channel's thumbnail style — specific to this lesson. */
+    fun lessonBlock(p: Project): String {
+        if (p.series.isBlank() || p.lessonNo <= 0) return ""
+        val suf = Series.suffix(p.series, p.lessonNo)
+        val info = Series.byName(p.series)
+        val day = info?.let { " (שיעור של יום ${it.dayName}" + (if (p.recordedAt > 0) ", הוקלט ב־${Series.dateText(p.recordedAt)})" else ")") } ?: ""
+        return """
+פרטי השיעור: $suf$day
+
+כותרת הסרטון — חובה בתבנית הקבועה של הערוץ: וו או שאלה מסקרנת (לרוב מסתיימת בסימן שאלה או קריאה), ואז " | $suf". בלי אימוג'ים. דוגמאות אמיתיות מהערוץ:
+מה יותר חמור: לאכול שרצים או לבטל תורה? | אגרת התשובה שיעור 1
+לקום כמו אריה! הסוד החסידי לניצחון על המיטה | סדר היום של יהודי שיעור 1
+מה קורה בעולם שאתה ישן? סוד משמרות הלילה ועולם החלומות | עין יעקב שיעור 1
+טעיתם? אל תענישו את עצמכם! | אגרת התשובה שיעור 2
+
+בתמונת השיעור: הכותרת הראשית על התמונה היא החלק שלפני הסימן | (הוו), ותגית הסדרה בתחתית היא "${p.series}".
+הסגנון של תמונות הערוץ, לדוגמה: הרב בצד אחד של התמונה, גדול וקרוב, עם הבעה חיה (חיוך רחב, הצבעה, מבט משועשע), ורקע קולנועי־סוריאליסטי שממחיש את הרעיון — אותיות אבן ענקיות על צוקים כשאחת מהן נשלפת ומאירה; מראה שבה הרב רואה את עצמו כחייזר בחלל ("אתה בכלל לא מפה"); חדר מלכות לילי עם כינור זהב וירח; ציצית מול שרטוטים קוסמיים. הכותרת גדולה מאוד, בצהוב בוהק עם מסגרת שחורה עבה; מתחתיה שורת משנה קצרה בלבן; ובתחתית תגית סדרה קטנה ונקייה.
+""".trim()
+    }
+
+    /** Puts [block] right before "התמלול:" (or at the end). */
+    fun beforeTranscript(prompt: String, block: String): String {
+        if (block.isBlank()) return prompt
+        val i = prompt.lastIndexOf("התמלול:")
+        return if (i > 0) prompt.substring(0, i).trimEnd() + "\n\n" + block + "\n\n" + prompt.substring(i) else prompt.trimEnd() + "\n\n" + block
+    }
+
     /** Shorts guidance, for prompts the user saved before it existed. */
     private val SHORTS_GUIDE = """
 הנחיות לבחירת שורטים — מה נכנס לשורט, לפי סדר העדיפות:

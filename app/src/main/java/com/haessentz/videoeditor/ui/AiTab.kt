@@ -196,7 +196,9 @@ private fun shareAsFile(ctx: Context, p: Project) {
 }
 
 private fun requestText(p: Project) =
-    AiImport.withThumbGuide(AiImport.withShortsGuide(AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language))) + "\n\n" + AiImport.transcriptText(p.transcript)
+    AiImport.beforeTranscript(
+        AiImport.withThumbGuide(AiImport.withShortsGuide(AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language))),
+        AiImport.lessonBlock(p)) + "\n\n" + AiImport.transcriptText(p.transcript)
 
 private fun fixText(p: Project) = AiImport.fixPrompt(p.language) + "\n\n" + AiImport.fixLines(p.transcript)
 
@@ -461,7 +463,8 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                         cutList = if (r.deletes.isNotEmpty()) removed else pr.cutList,
                         shorts = pr.shorts + newShorts,
                         youtube = pr.youtube.copy(
-                            title = title.trim().ifBlank { pr.youtube.title },
+                            title = title.trim().ifBlank { pr.youtube.title }
+                                .let { com.haessentz.videoeditor.data.Series.withSuffix(it, pr.series, pr.lessonNo) },
                             description = desc.trim().ifBlank { pr.youtube.description },
                             chapters = if (r.chapters.isNotEmpty()) chapters else pr.youtube.chapters,
                             videoUri = null,

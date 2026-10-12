@@ -181,10 +181,14 @@ private fun createProject(ctx: Context, uri: Uri): Project {
         val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
         if (rot == 90 || rot == 270) { val t = w; w = h; h = t }
         if (dur <= 0) throw IllegalStateException("הקובץ לא נראה כמו סרטון תקין")
+        val recorded = com.haessentz.videoeditor.data.Series.recordingDate(
+            r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DATE), name)
+        val series = if (Prefs.lastLanguage == "he") com.haessentz.videoeditor.data.Series.forDate(recorded)?.name ?: "" else ""
         val p = Project(
             id = UUID.randomUUID().toString(), name = name, videoUri = uri.toString(),
             durationMs = dur, width = w, height = h, createdAt = System.currentTimeMillis(),
             language = Prefs.lastLanguage,
+            series = series, lessonNo = if (series.isNotEmpty()) Prefs.lastLessonNo(series) + 1 else 0, recordedAt = recorded,
             log = listOf(com.haessentz.videoeditor.data.LogEntry(false, "הסרטון נטען (${fmtMs(dur)}). כתוב פקודה, או \"עזרה\" לרשימת הפקודות."))
         )
         ProjectStore.put(p)
