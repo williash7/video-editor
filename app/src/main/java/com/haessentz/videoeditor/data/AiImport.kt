@@ -4,7 +4,7 @@ package com.haessentz.videoeditor.data
 object AiImport {
 
     val DEFAULT_PROMPT = """
-להלן תמלול של סרטון, עם זמן בתחילת כל שורה.
+להלן תמלול של סרטון. בתחילת כל שורה מופיעים בסוגריים זמן ההתחלה וזמן הסוף שלה.
 אנא החזר תשובה בדיוק בתבנית הבאה, עם הכותרות המסומנות ב־###, בלי טקסט נוסף לפני או אחרי:
 
 ### מחיקה
@@ -12,8 +12,8 @@ object AiImport {
 מ:שש-מ:שש | סיבה קצרה
 
 ### שורטים
-(3 עד 5 קטעים חזקים של 30 עד 60 שניות, שמובנים גם בלי הקשר)
-מ:שש-מ:שש | כותרת לשורט
+(3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
+מ:שש-מ:שש | כותרת לשורט | על מה השורט, במשפט אחד
 
 ### כותרת
 כותרת אחת מושכת לסרטון
@@ -32,7 +32,7 @@ object AiImport {
 
     /** Same request for a lesson in Russian: headers stay in Hebrew (so the app can read them), content in Russian. */
     val DEFAULT_PROMPT_RU = """
-להלן תמלול של סרטון ברוסית, עם זמן בתחילת כל שורה.
+להלן תמלול של סרטון ברוסית. בתחילת כל שורה מופיעים בסוגריים זמן ההתחלה וזמן הסוף שלה.
 אנא החזר תשובה בדיוק בתבנית הבאה. את הכותרות המסומנות ב־### השאר בדיוק כפי שהן כתובות כאן (בעברית), אבל את כל התוכן — כותרת, תיאור, שמות השורטים ושמות הפרקים — כתוב ברוסית תקנית. בלי טקסט נוסף לפני או אחרי:
 
 ### מחיקה
@@ -40,8 +40,8 @@ object AiImport {
 מ:שש-מ:שש | סיבה קצרה
 
 ### שורטים
-(3 עד 5 קטעים חזקים של 30 עד 60 שניות, שמובנים גם בלי הקשר)
-מ:שש-מ:שש | כותרת לשורט ברוסית
+(3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
+מ:שש-מ:שש | כותרת לשורט ברוסית | על מה השורט, במשפט אחד בעברית
 
 ### כותרת
 כותרת אחת מושכת לסרטון, ברוסית
@@ -98,19 +98,40 @@ $extra
     fun transcriptText(transcript: List<Seg>): String {
         val sb = StringBuilder()
         var lineStart = -1L
+        var lineEnd = 0L
         val line = StringBuilder()
+        fun flush() {
+            if (line.isEmpty()) return
+            sb.append('[').append(fmtMs(lineStart)).append('-').append(fmtMs(lineEnd)).append("] ").append(line).append('\n')
+            line.setLength(0); lineStart = -1
+        }
         for (s in transcript) {
             if (lineStart < 0) lineStart = s.startMs
             if (line.isNotEmpty()) line.append(' ')
             line.append(s.text.trim())
+            lineEnd = s.endMs
             val ends = s.text.trimEnd().lastOrNull()?.let { it == '.' || it == '?' || it == '!' } ?: false
-            if (line.length > 110 || (ends && line.length > 40)) {
-                sb.append('[').append(fmtMs(lineStart)).append("] ").append(line).append('\n')
-                line.setLength(0); lineStart = -1
-            }
+            if (line.length > 90 || (ends && line.length > 25)) flush()
         }
-        if (line.isNotEmpty()) sb.append('[').append(fmtMs(lineStart)).append("] ").append(line).append('\n')
+        flush()
         return sb.toString()
+    }
+
+    /** Moves a range's edges to the nearest sentence start/end in the transcript (within a few seconds). */
+    fun snapToSentences(r: Range, transcript: List<Seg>): Range {
+        if (transcript.isEmpty()) return r
+        fun endsSentence(s: Seg) = s.text.trimEnd().lastOrNull()?.let { it == '.' || it == '?' || it == '!' } ?: false
+        // start: a segment that starts near r.start; prefer one right after a sentence end
+        val starts = transcript.indices.filter { kotlin.math.abs(transcript[it].startMs - r.startMs) <= 4000 }
+        val start = starts.minByOrNull { i ->
+            val d = kotlin.math.abs(transcript[i].startMs - r.startMs)
+            val bonus = if (i == 0 || endsSentence(transcript[i - 1])) 0 else 2500
+            d + bonus
+        }?.let { transcript[it].startMs } ?: r.startMs
+        val ends = transcript.filter { kotlin.math.abs(it.endMs - r.endMs) <= 5000 && it.endMs > start + 5000 }
+        val end = ends.minByOrNull { s -> kotlin.math.abs(s.endMs - r.endMs) + if (endsSentence(s)) 0 else 2500 }?.endMs ?: r.endMs
+        // a little air after the last word
+        return Range(start, (end + 300).coerceAtLeast(start + 1000))
     }
 
     data class Item(val range: Range, val label: String)

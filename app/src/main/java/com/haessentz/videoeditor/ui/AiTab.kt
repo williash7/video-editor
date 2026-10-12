@@ -326,7 +326,12 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
     val delSel = remember(r) { mutableStateListOf(*Array(r.deletes.size) { true }) }
     val shortSel = remember(r) { mutableStateListOf(*Array(r.shorts.size) { true }) }
     val chapSel = remember(r) { mutableStateListOf(*Array(r.chapters.size) { true }) }
-    val shortTitles = remember(r) { mutableStateListOf(*r.shorts.map { it.label }.toTypedArray()) }
+    // "title | about" → separate fields; times snapped to sentence boundaries
+    val shortTitles = remember(r) { mutableStateListOf(*r.shorts.map { it.label.substringBefore(" | ").trim() }.toTypedArray()) }
+    val shortAbout = remember(r) { r.shorts.map { if (it.label.contains(" | ")) it.label.substringAfter(" | ").trim() else "" } }
+    val shortRanges = remember(r, p.transcript) {
+        r.shorts.map { AiImport.snapToSentences(Range(it.range.startMs, it.range.endMs.coerceAtMost(p.durationMs)), p.transcript) }
+    }
     val chapNames = remember(r) { mutableStateListOf(*r.chapters.map { it.title }.toTypedArray()) }
     var title by remember(r) { mutableStateOf(r.title) }
     var desc by remember(r) { mutableStateOf(r.description) }
@@ -354,16 +359,21 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
 
             if (r.shorts.isNotEmpty()) {
                 Section("שורטים (${r.shorts.size})")
-                r.shorts.forEachIndexed { i, it ->
+                Text("הזמנים הותאמו לתחילת משפט ולסופו.", style = MaterialTheme.typography.labelSmall)
+                r.shorts.forEachIndexed { i, _ ->
+                    val rg = shortRanges[i]
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(shortSel[i], { v -> shortSel[i] = v })
                         Column(Modifier.weight(1f)) {
-                            Text("${fmtMs(it.range.startMs)}–${fmtMs(it.range.endMs)} (${it.range.lengthMs / 1000} שנ׳)",
+                            Text("${fmtMs(rg.startMs)}–${fmtMs(rg.endMs)} (${rg.lengthMs / 1000} שנ׳)",
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                             OutlinedTextField(shortTitles[i], { v -> shortTitles[i] = v }, Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall, singleLine = true)
+                            if (shortAbout[i].isNotBlank()) Text(shortAbout[i], style = MaterialTheme.typography.bodySmall)
+                            Text("״" + shortText(p, rg).take(160) + "…״", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        PlayBtn { player.seek(it.range.startMs) }
+                        PlayBtn { player.seek(rg.startMs) }
                     }
                 }
             }
@@ -395,16 +405,16 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
             if (r.shorts.isNotEmpty()) CheckLine("לייצא מיד את השורטים", exportShorts) { exportShorts = it }
             Button(onClick = {
                 val style = SubStyle()
-                val newShorts = r.shorts.mapIndexedNotNull { i, it ->
-                    if (!shortSel[i]) return@mapIndexedNotNull null
-                    val end = it.range.endMs.coerceAtMost(p.durationMs)
+                val newShorts = r.shorts.indices.mapNotNull { i ->
+                    if (!shortSel[i]) return@mapNotNull null
+                    val rg = shortRanges[i]
                     val t = shortTitles[i].trim()
                     ShortClip(
                         id = UUID.randomUUID().toString(),
                         name = t.ifBlank { "שורט" }.take(40),
-                        startMs = it.range.startMs, endMs = end,
-                        cues = Cues.forClip(p.transcript, it.range.startMs, end, style.maxWords),
-                        subtitles = true, style = style, title = t,
+                        startMs = rg.startMs, endMs = rg.endMs,
+                        cues = Cues.forClip(p.transcript, rg.startMs, rg.endMs, style.maxWords),
+                        subtitles = true, style = style, title = t, about = shortAbout[i],
                     )
                 }
                 val chapters = r.chapters.mapIndexedNotNull { i, c -> if (chapSel[i]) Chapter(c.ms, chapNames[i].trim()) else null }
@@ -464,3 +474,7 @@ fun CheckLine(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
         Text(label)
     }
 }
+
+/** The words spoken inside a range, from the transcript. */
+fun shortText(p: Project, r: Range): String =
+    p.transcript.filter { it.endMs > r.startMs && it.startMs < r.endMs }.joinToString(" ") { it.text.trim() }

@@ -127,9 +127,10 @@ object Jobs {
         ctx: Context, p: Project, js: JobScope, ranges: List<Range>,
         effects: List<androidx.media3.common.Effect>, name: String,
         from: Float = 0f, to: Float = 1f, kind: String = "clip", removed: List<Range> = emptyList(),
+        src: Uri = Uri.parse(p.videoUri),
     ): OutputFile {
         val tmp = File(ctx.cacheDir, "export_${System.currentTimeMillis()}.mp4")
-        VideoExporter.export(ctx, Uri.parse(p.videoUri), ranges, effects, tmp) { f ->
+        VideoExporter.export(ctx, src, ranges, effects, tmp) { f ->
             js.progress(from + (to - from) * f, "מייצא… ${(f * 100).toInt()}%")
         }
         js.progress(to, "שומר לגלריה…")
@@ -224,8 +225,32 @@ object Jobs {
                 ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(cropX = cropX, framed = true) else it }) }
             }
             val cues = if (s.subtitles) s.cues else null
-            val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs)
-            val o = runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
+            // parts of the cut list that fall inside this short, relative to its start
+            val inner = if (s.followCuts) Ranges.normalize(
+                p.cutList.filter { it.endMs > s.startMs && it.startMs < s.endMs }
+                    .map { Range(it.startMs.coerceAtLeast(s.startMs) - s.startMs, it.endMs.coerceAtMost(s.endMs) - s.startMs) },
+                s.endMs - s.startMs) else emptyList()
+            val o = if (inner.isEmpty()) {
+                val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs)
+                runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
+            } else {
+                // 1) join the kept pieces, 2) crop + subtitles on the joined clip (cue times shifted to match)
+                js.progress(0f, "מוציא מהשורט ${inner.size} קטעים שנמחקו…")
+                val keep = Ranges.complement(inner, s.endMs - s.startMs, minKeepMs = 100).map { Range(it.startMs + s.startMs, it.endMs + s.startMs) }
+                val joined = File(ctx.cacheDir, "short_join_${System.currentTimeMillis()}.mp4")
+                try {
+                    VideoExporter.export(ctx, Uri.parse(p.videoUri), keep, emptyList(), joined) { f -> js.progress(0.4f * f, "מוציא קטעים שנמחקו… ${(f * 100).toInt()}%") }
+                    val len = keep.sumOf { it.lengthMs }
+                    val mapped = cues?.map {
+                        com.haessentz.videoeditor.data.Seg(
+                            com.haessentz.videoeditor.data.AiImport.mapTime(it.startMs, inner),
+                            com.haessentz.videoeditor.data.AiImport.mapTime(it.endMs, inner), it.text)
+                    }?.filter { it.endMs > it.startMs }
+                    val effects = VideoExporter.shortEffects(p.width, p.height, cropX, mapped, s.style, 0)
+                    runExport(ctx, p, js, listOf(Range(0, len)), effects, "${p.name}_${s.name}", 0.4f, 1f, kind = "short",
+                        src = Uri.fromFile(joined))
+                } finally { joined.delete() }
+            }
             ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(outputUri = o.uri) else it }) }
             addLog(pid, "השורט מוכן ✓ ${o.name}")
         }

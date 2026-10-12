@@ -64,6 +64,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
@@ -118,7 +120,16 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
     val rel = player.positionMs - s.startMs
     LaunchedEffect(player.positionMs) {
         if (player.playing && player.positionMs >= s.endMs) player.seek(s.startMs)
+        // jump over parts removed from the long video, like the export does
+        if (player.playing && s.followCuts) {
+            p.cutList.firstOrNull { player.positionMs >= it.startMs && player.positionMs < it.endMs - 150 && it.endMs > s.startMs && it.startMs < s.endMs }
+                ?.let { player.seek(it.endMs) }
+        }
     }
+    var dragCrop by remember(sid) { mutableStateOf<Float?>(null) }
+    var drag by remember(sid) { mutableStateOf<ClosedFloatingPointRange<Float>?>(null) }
+    fun window(a: Long, b: Long) = (a - 45_000).coerceAtLeast(0) to (b + 45_000).coerceAtMost(p.durationMs)
+    var win by remember(sid) { mutableStateOf(window(s.startMs, s.endMs)) }
     var tab by remember { mutableIntStateOf(0) }
     var renaming by remember { mutableStateOf(false) }
 
@@ -134,7 +145,9 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
     ) { pad ->
         Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
             Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                ShortPreview(p, s, player, rel, Modifier.height(300.dp))
+                ShortPreview(p, s, player, rel, Modifier.height(300.dp), dragCrop,
+                    onCropDrag = { v -> dragCrop = v },
+                    onCropDragEnd = { dragCrop?.let { v -> save { it.copy(cropX = v, framed = true) } }; dragCrop = null })
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("${fmtMs(rel.coerceAtLeast(0), true)} / ${fmtMs(s.endMs - s.startMs, true)}", fontWeight = FontWeight.Bold)
@@ -146,13 +159,47 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
                         }
                     }
                     Text("גבולות השורט", style = MaterialTheme.typography.labelMedium)
-                    TrimRow("התחלה", s.startMs, player.positionMs,
-                        onNudge = { d -> save { it.withRange((it.startMs + d).coerceIn(0, it.endMs - 1000), it.endMs, p) } },
+                    TrimRow("התחלה", s.startMs,
+                        onNudge = { d -> save { it.withRange((it.startMs + d).coerceIn(0, it.endMs - 1000), it.endMs, p) }; player.seek(s.startMs + d, play = false) },
                         onSetHere = { save { it.withRange(player.positionMs.coerceIn(0, it.endMs - 1000), it.endMs, p) } })
-                    TrimRow("סוף", s.endMs, player.positionMs,
-                        onNudge = { d -> save { it.withRange(it.startMs, (it.endMs + d).coerceIn(it.startMs + 1000, p.durationMs), p) } },
+                    TrimRow("סוף", s.endMs,
+                        onNudge = { d -> save { it.withRange(it.startMs, (it.endMs + d).coerceIn(it.startMs + 1000, p.durationMs), p) }; player.seek((s.endMs + d - 3000).coerceAtLeast(s.startMs), play = true) },
                         onSetHere = { save { it.withRange(it.startMs, player.positionMs.coerceIn(it.startMs + 1000, p.durationMs), p) } })
+                    if (s.about.isNotBlank()) Text(s.about, style = MaterialTheme.typography.labelSmall)
                 }
+            }
+            // drag the two handles to move the start and end; the window around the short is +-45 seconds
+            // time runs left to right, also in the Hebrew layout
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Ltr) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                val cur = drag ?: (s.startMs.toFloat()..s.endMs.toFloat())
+                androidx.compose.material3.RangeSlider(
+                    value = cur,
+                    onValueChange = { v ->
+                        val prev = drag ?: cur
+                        drag = v
+                        if (v.start != prev.start) player.seek(v.start.toLong(), play = false)
+                        else player.seek(v.endInclusive.toLong(), play = false)
+                    },
+                    onValueChangeFinished = {
+                        drag?.let { v ->
+                            val a = v.start.toLong(); val b = v.endInclusive.toLong().coerceAtLeast(a + 1000)
+                            save { it.withRange(a, b, p) }
+                            win = window(a, b)
+                        }
+                        drag = null
+                    },
+                    valueRange = win.first.toFloat()..win.second.toFloat(),
+                )
+                Row(Modifier.fillMaxWidth()) {
+                    Text(fmtMs(win.first), style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.weight(1f))
+                    Text("${fmtMs(cur.start.toLong(), true)} – ${fmtMs(cur.endInclusive.toLong(), true)}",
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text(fmtMs(win.second), style = MaterialTheme.typography.labelSmall)
+                }
+            }
             }
             TabRow(selectedTabIndex = tab) {
                 Tab(tab == 0, { tab = 0 }, text = { Text("כתוביות") })
@@ -197,12 +244,14 @@ private fun ShortClip.withRange(start: Long, end: Long, p: Project): ShortClip {
 }
 
 @Composable
-private fun TrimRow(label: String, value: Long, here: Long, onNudge: (Long) -> Unit, onSetHere: () -> Unit) {
+private fun TrimRow(label: String, value: Long, onNudge: (Long) -> Unit, onSetHere: () -> Unit) {
     Column {
         Text("$label: ${fmtMs(value, true)}", style = MaterialTheme.typography.bodySmall)
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            SmallBtn("‎-1s") { onNudge(-1000) }
-            SmallBtn("‎+1s") { onNudge(1000) }
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SmallBtn("‎-1") { onNudge(-1000) }
+            SmallBtn("‎-0.3") { onNudge(-300) }
+            SmallBtn("‎+0.3") { onNudge(300) }
+            SmallBtn("‎+1") { onNudge(1000) }
             SmallBtn("כאן") { onSetHere() }
         }
     }
@@ -219,8 +268,13 @@ private fun SmallBtn(text: String, onClick: () -> Unit) {
 /** 9:16 live preview: crops the video exactly like the export and draws subtitles with the same renderer. */
 @UnstableApi
 @Composable
-private fun ShortPreview(p: Project, s: ShortClip, player: PlayerState, relMs: Long, modifier: Modifier) {
+private fun ShortPreview(
+    p: Project, s: ShortClip, player: PlayerState, relMs: Long, modifier: Modifier,
+    cropOverride: Float? = null, onCropDrag: (Float) -> Unit = {}, onCropDragEnd: () -> Unit = {},
+) {
     val cue = if (s.subtitles) s.cues.firstOrNull { relMs >= it.startMs && relMs < it.endMs } else null
+    val cropX = cropOverride ?: s.cropX
+    val density = androidx.compose.ui.platform.LocalDensity.current
     BoxWithConstraints(modifier.aspectRatio(9f / 16f).background(Color.Black)) {
         val boxW = maxWidth
         val boxH = maxHeight
@@ -228,10 +282,29 @@ private fun ShortPreview(p: Project, s: ShortClip, player: PlayerState, relMs: L
         val target = 9f / 16f
         if (srcAspect > target) {
             val vidW = boxH * srcAspect
-            val dx = -(vidW - boxW) * s.cropX
+            val rangePx = with(density) { (vidW - boxW).toPx() }.coerceAtLeast(1f)
+            val latest = androidx.compose.runtime.rememberUpdatedState(cropX)
+            val dragMod = Modifier.pointerInput(s.id) {
+                var x = latest.value
+                detectHorizontalDragGestures(
+                    onDragStart = { x = latest.value },
+                    onDragEnd = { onCropDragEnd() },
+                    onDragCancel = { onCropDragEnd() },
+                ) { change, dx ->
+                    change.consume()
+                    // drag the picture like a photo: dragging right shows more of the left side
+                    x = (x - dx / rangePx).coerceIn(0f, 1f)
+                    onCropDrag(x)
+                }
+            }
+            val dx = -(vidW - boxW) * cropX
             Box(Modifier.fillMaxSize().clipToBounds()) {
                 VideoView(player, Modifier.requiredSize(vidW, boxH).absoluteOffset(x = dx + (vidW - boxW) / 2), controls = false, texture = true)
             }
+            // a transparent layer on top catches the drag (the video view itself would swallow touches)
+            Box(Modifier.fillMaxSize().then(dragMod))
+            Text("↔ גרור", Modifier.align(Alignment.TopCenter).padding(4.dp).background(Color(0x66000000), RoundedCornerShape(6.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp), color = Color.White, style = MaterialTheme.typography.labelSmall)
         } else {
             VideoView(player, Modifier.fillMaxSize(), controls = false, zoom = true, texture = true)
         }
@@ -419,6 +492,12 @@ private fun FrameEditor(p: Project, s: ShortClip, save: ((ShortClip) -> ShortCli
     var detecting by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf<String?>(null) }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
+        if (p.cutList.any { it.endMs > s.startMs && it.startMs < s.endMs }) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("להוציא מהשורט קטעים שנמחקו מהסרטון", Modifier.weight(1f))
+                Switch(checked = s.followCuts, onCheckedChange = { v -> save { it.copy(followCuts = v) } })
+            }
+        }
         if (vertical) {
             Text("הסרטון כבר אנכי, אין צורך במסגור.")
         } else {
@@ -428,6 +507,8 @@ private fun FrameEditor(p: Project, s: ShortClip, save: ((ShortClip) -> ShortCli
                 SmallBtn("שמאל") { save { it.copy(cropX = 0f, framed = true) } }
                 SmallBtn("מרכז") { save { it.copy(cropX = 0.5f, framed = true) } }
                 SmallBtn("ימין") { save { it.copy(cropX = 1f, framed = true) } }
+                SmallBtn("◀") { save { it.copy(cropX = (it.cropX - 0.04f).coerceIn(0f, 1f), framed = true) } }
+                SmallBtn("▶") { save { it.copy(cropX = (it.cropX + 0.04f).coerceIn(0f, 1f), framed = true) } }
                 SmallBtn(if (detecting) "מחפש…" else "על הפנים ✨") {
                     if (!detecting) {
                         detecting = true
@@ -441,7 +522,7 @@ private fun FrameEditor(p: Project, s: ShortClip, save: ((ShortClip) -> ShortCli
                     }
                 }
             }
-            Text("התצוגה למעלה מראה בדיוק מה ייכנס לשורט. אם לא כיוונת ידנית, בייצוא האפליקציה ממרכזת אוטומטית על הפנים.",
+            Text("אפשר גם לגרור את התמונה בתצוגה למעלה ימינה ושמאלה. התצוגה מראה בדיוק מה ייכנס לשורט.",
                 Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall)
             note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }

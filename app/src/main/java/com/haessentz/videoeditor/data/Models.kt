@@ -45,6 +45,10 @@ data class ShortClip(
     val style: SubStyle = SubStyle(),
     /** Title for YouTube (e.g. suggested by the AI). */
     val title: String = "",
+    /** One line on what the short is about (from the AI). */
+    val about: String = "",
+    /** Leave out the parts that were removed from the long video (the cut list). */
+    val followCuts: Boolean = true,
     /** Gallery uri of the last export of this short. */
     val outputUri: String? = null,
     val youtubeId: String? = null,

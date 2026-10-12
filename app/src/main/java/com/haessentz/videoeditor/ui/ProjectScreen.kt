@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -62,6 +63,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -135,6 +139,7 @@ fun ProjectScreen(pid: String, nav: Nav) {
                     androidx.compose.material3.FilterChip(!showEdited, { showEdited = false }, label = { Text("מקורי") })
                 }
             }
+            TimelineBar(p, player)
             ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
                 tabs.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
             }
@@ -380,13 +385,22 @@ private fun ShortsTab(p: Project, player: PlayerState, nav: Nav) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Text(s.name, fontWeight = FontWeight.Bold)
-                    Text("${fmtMs(s.startMs)} – ${fmtMs(s.endMs)} · ${(s.endMs - s.startMs) / 1000} שניות · " +
-                            if (s.subtitles) "${s.cues.size} כתוביות" else "בלי כתוביות", style = MaterialTheme.typography.bodySmall)
+                    val cutInside = p.cutList.filter { it.endMs > s.startMs && it.startMs < s.endMs }
+                        .sumOf { minOf(it.endMs, s.endMs) - maxOf(it.startMs, s.startMs) }
+                    Text("${fmtMs(s.startMs)} – ${fmtMs(s.endMs)} · ${(s.endMs - s.startMs - if (s.followCuts) cutInside else 0) / 1000} שניות · " +
+                            (if (s.subtitles) "${s.cues.size} כתוביות" else "בלי כתוביות") +
+                            (if (s.followCuts && cutInside > 0) " · בלי ${cutInside / 1000} שנ׳ שנמחקו" else ""),
+                        style = MaterialTheme.typography.bodySmall)
+                    if (s.about.isNotBlank()) Text(s.about, style = MaterialTheme.typography.bodySmall)
+                    val words = shortText(p, Range(s.startMs, s.endMs))
+                    if (words.isNotBlank()) Text("״" + words.take(180) + (if (words.length > 180) "…" else "") + "״",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
                         FilledTonalButton(onClick = { nav.go(Screen.ShortEditor(p.id, s.id)) }) {
                             Icon(Icons.Default.Edit, null); Text(" עריכה")
                         }
                         Button(onClick = { Jobs.exportShort(ctx, p.id, s.id) }) { Text("ייצא") }
+                        IconButton(onClick = { player.seek(s.startMs) }) { Icon(Icons.Default.PlayArrow, "נגן בסרטון") }
                         Spacer(Modifier.weight(1f))
                         IconButton(onClick = { ProjectStore.update(p.id) { it.copy(shorts = it.shorts.filter { x -> x.id != s.id }) } }) {
                             Icon(Icons.Default.Delete, "מחק")
@@ -417,5 +431,47 @@ private fun FilesTab(p: Project) {
                 }
             }
         }
+    }
+}
+
+/**
+ * A bar under the player for the whole (original) video: removed parts in red, shorts in the main colour,
+ * and the current position. Tap or drag to jump.
+ */
+@Composable
+fun TimelineBar(p: Project, player: PlayerState) {
+    val dur = p.durationMs.coerceAtLeast(1).toFloat()
+    val cutColor = MaterialTheme.colorScheme.error.copy(alpha = 0.55f)
+    val shortColor = MaterialTheme.colorScheme.primary
+    val bg = MaterialTheme.colorScheme.surfaceVariant
+    val head = MaterialTheme.colorScheme.onSurface
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+        androidx.compose.foundation.Canvas(
+            Modifier.fillMaxWidth().height(22.dp)
+                .pointerInput(p.id) {
+                    detectTapGestures { o -> player.seek((o.x / size.width * dur).toLong(), play = false) }
+                }
+                .pointerInput(p.id) {
+                    detectHorizontalDragGestures { change, _ ->
+                        player.seek((change.position.x / size.width * dur).toLong().coerceIn(0, p.durationMs), play = false)
+                    }
+                }
+        ) {
+            val w = size.width; val h = size.height
+            fun x(ms: Long) = ms / dur * w
+            drawRect(bg, topLeft = androidx.compose.ui.geometry.Offset(0f, h * 0.3f), size = androidx.compose.ui.geometry.Size(w, h * 0.4f))
+            p.cutList.forEach { r ->
+                drawRect(cutColor, topLeft = androidx.compose.ui.geometry.Offset(x(r.startMs), h * 0.3f),
+                    size = androidx.compose.ui.geometry.Size((x(r.endMs) - x(r.startMs)).coerceAtLeast(2f), h * 0.4f))
+            }
+            p.shorts.forEach { sh ->
+                drawRect(shortColor, topLeft = androidx.compose.ui.geometry.Offset(x(sh.startMs), h * 0.05f),
+                    size = androidx.compose.ui.geometry.Size((x(sh.endMs) - x(sh.startMs)).coerceAtLeast(3f), h * 0.2f))
+            }
+            val px = x(player.positionMs)
+            drawRect(head, topLeft = androidx.compose.ui.geometry.Offset(px - 1.5f, 0f), size = androidx.compose.ui.geometry.Size(3f, h))
+        }
+        if (p.shorts.isNotEmpty() || p.cutList.isNotEmpty())
+            Text("למעלה: שורטים · באמצע באדום: קטעים שנמחקו", style = MaterialTheme.typography.labelSmall)
     }
 }
