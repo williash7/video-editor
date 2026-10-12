@@ -21,20 +21,32 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import kotlinx.coroutines.delay
 
-class PlayerState(val player: ExoPlayer) {
+/**
+ * [removed]: parts of the original that are missing from the file being played (an edited export).
+ * Everything outside the player works on the ORIGINAL timeline: [positionMs] and [seek] translate,
+ * so transcript, shorts and chapters keep working while the edited video is shown.
+ */
+class PlayerState(val player: ExoPlayer, val removed: List<com.haessentz.videoeditor.data.Range> = emptyList()) {
     var positionMs by mutableLongStateOf(0L)
+    /** Position inside the file actually playing. */
+    var fileMs by mutableLongStateOf(0L)
     var playing by mutableStateOf(false)
     fun seek(ms: Long, play: Boolean = true) {
-        player.seekTo(ms.coerceAtLeast(0))
+        player.seekTo(com.haessentz.videoeditor.data.AiImport.mapTime(ms.coerceAtLeast(0), removed))
         if (play) player.play()
+    }
+    fun toOriginal(fileMs: Long): Long {
+        var o = fileMs
+        for (r in removed.sortedBy { it.startMs }) { if (o >= r.startMs) o += r.lengthMs else break }
+        return o
     }
     fun toggle() = if (player.isPlaying) player.pause() else player.play()
 }
 
 @Composable
-fun rememberPlayer(uri: String): PlayerState {
+fun rememberPlayer(uri: String, removed: List<com.haessentz.videoeditor.data.Range> = emptyList()): PlayerState {
     val ctx = LocalContext.current
-    val state = remember(uri) { PlayerState(buildPlayer(ctx, uri)) }
+    val state = remember(uri) { PlayerState(buildPlayer(ctx, uri), removed) }
     DisposableEffect(state) {
         val l = object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { state.playing = isPlaying }
@@ -47,7 +59,9 @@ fun rememberPlayer(uri: String): PlayerState {
     }
     LaunchedEffect(state) {
         while (true) {
-            state.positionMs = state.player.currentPosition
+            val f = state.player.currentPosition
+            state.fileMs = f
+            state.positionMs = state.toOriginal(f)
             delay(100)
         }
     }

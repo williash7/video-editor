@@ -97,7 +97,16 @@ fun ProjectScreen(pid: String, nav: Nav) {
         LaunchedEffect(Unit) { nav.back() }
         return
     }
-    val player = rememberPlayer(p.videoUri)
+    val ctx = LocalContext.current
+    // the newest edited export that still exists on the phone
+    val edited = remember(p.outputs) {
+        p.outputs.filter { it.kind == "edited" }.firstOrNull { o ->
+            runCatching { ctx.contentResolver.openFileDescriptor(android.net.Uri.parse(o.uri), "r")?.use { true } ?: false }.getOrDefault(false)
+        }
+    }
+    var showEdited by remember(edited?.uri) { mutableStateOf(edited != null) }
+    val source = if (showEdited && edited != null) edited else null
+    val player = rememberPlayer(source?.uri ?: p.videoUri, source?.removed ?: emptyList())
     var tab by remember { mutableIntStateOf(0) }
     val tabs = listOf("פקודות", "תמלול", "בינה", "רשימת חיתוך", "שורטים", "יוטיוב", "קבצים")
 
@@ -114,10 +123,18 @@ fun ProjectScreen(pid: String, nav: Nav) {
             Box(Modifier.fillMaxWidth().height(210.dp).background(Color.Black)) {
                 VideoView(player, Modifier.fillMaxSize())
             }
-            Text(
-                "מיקום: ${fmtMs(player.positionMs, tenths = true)} / ${fmtMs(p.durationMs)}",
-                Modifier.padding(horizontal = 12.dp, vertical = 4.dp), style = MaterialTheme.typography.labelMedium
-            )
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (source != null) "ערוך: ${fmtMs(player.fileMs, tenths = true)} / ${fmtMs(p.durationMs - source.removed.sumOf { it.lengthMs })} · במקור ${fmtMs(player.positionMs)}"
+                    else "מיקום: ${fmtMs(player.positionMs, tenths = true)} / ${fmtMs(p.durationMs)}",
+                    Modifier.weight(1f), style = MaterialTheme.typography.labelMedium
+                )
+                if (edited != null) {
+                    androidx.compose.material3.FilterChip(showEdited, { showEdited = true }, label = { Text("ערוך") })
+                    Spacer(Modifier.width(6.dp))
+                    androidx.compose.material3.FilterChip(!showEdited, { showEdited = false }, label = { Text("מקורי") })
+                }
+            }
             ScrollableTabRow(selectedTabIndex = tab, edgePadding = 8.dp) {
                 tabs.forEachIndexed { i, t -> Tab(selected = tab == i, onClick = { tab = i }, text = { Text(t) }) }
             }
