@@ -12,8 +12,8 @@ object AiImport {
 מ:שש-מ:שש | סיבה קצרה
 
 ### שורטים
-(3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
-מ:שש-מ:שש | כותרת לשורט | על מה השורט, במשפט אחד
+(3 עד 5 שורטים של 20 עד 60 שניות. כל שורט מעביר נקודה אחת, נקייה, בלי מה שמסביב. מותר — ועדיף — לבנות שורט מכמה קטעים סמוכים ולדלג באמצע על משפטים ומילים מיותרים: הקדמות, חזרות, סטיות מהנושא, היסוסים ו"כאילו". מחברים את הקטעים בסימן + . כל קטע מתחיל בדיוק בזמן ההתחלה של שורה בתמלול ונגמר בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. השורט פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול קטעים מרשימת המחיקה)
+מ:שש-מ:שש + מ:שש-מ:שש + מ:שש-מ:שש | כותרת לשורט | על מה השורט, במשפט אחד
 
 ### תיקונים
 (בדיקת עובדות: עבור על כל השיעור ובדוק כל מקור שצוטט (ספר, פרק, דף, פסוק), כל ציטוט, שם של אדם, תאריך, מספר, עובדה היסטורית ופסק הלכה שנאמרו. ציין רק טעות ודאית — אם אינך בטוח, אל תציין. לכל טעות: הזמן המדויק שבו נאמרה, ותיקון קצר וברור שיופיע על המסך ליד כוכבית. אם לא נמצאו טעויות — השאר את החלק הזה ריק)
@@ -44,8 +44,8 @@ object AiImport {
 מ:שש-מ:שש | סיבה קצרה
 
 ### שורטים
-(3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
-מ:שש-מ:שש | כותרת לשורט ברוסית | על מה השורט, במשפט אחד בעברית
+(3 עד 5 שורטים של 20 עד 60 שניות. כל שורט מעביר נקודה אחת, נקייה, בלי מה שמסביב. מותר — ועדיף — לבנות שורט מכמה קטעים סמוכים ולדלג באמצע על משפטים ומילים מיותרים: הקדמות, חזרות, סטיות מהנושא, היסוסים ו"כאילו". מחברים את הקטעים בסימן + . כל קטע מתחיל בדיוק בזמן ההתחלה של שורה בתמלול ונגמר בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. השורט פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול קטעים מרשימת המחיקה)
+מ:שש-מ:שש + מ:שש-מ:שש + מ:שש-מ:שש | כותרת לשורט ברוסית | על מה השורט, במשפט אחד בעברית
 
 ### תיקונים
 (בדיקת עובדות: עבור על כל השיעור ובדוק כל מקור שצוטט (ספר, פרק, דף, פסוק), כל ציטוט, שם של אדם, תאריך, מספר, עובדה היסטורית ופסק הלכה שנאמרו. ציין רק טעות ודאית — אם אינך בטוח, אל תציין. לכל טעות: הזמן המדויק שבו נאמרה, ותיקון קצר וברור ברוסית שיופיע על המסך ליד כוכבית. אם לא נמצאו טעויות — השאר את החלק הזה ריק)
@@ -138,10 +138,20 @@ $extra
             line.append(s.text.trim())
             lineEnd = s.endMs
             val ends = s.text.trimEnd().lastOrNull()?.let { it == '.' || it == '?' || it == '!' } ?: false
-            if (line.length > 90 || (ends && line.length > 25)) flush()
+            if (line.length > 45 || (ends && line.length > 15)) flush()
         }
         flush()
         return sb.toString()
+    }
+
+    /** Moves a piece's edges to the nearest segment start/end (the transcript lines the AI saw). */
+    fun snapPiece(r: Range, transcript: List<Seg>): Range {
+        if (transcript.isEmpty()) return r
+        val start = transcript.filter { kotlin.math.abs(it.startMs - r.startMs) <= 2500 }
+            .minByOrNull { kotlin.math.abs(it.startMs - r.startMs) }?.startMs ?: r.startMs
+        val end = transcript.filter { kotlin.math.abs(it.endMs - r.endMs) <= 2500 && it.endMs > start }
+            .minByOrNull { kotlin.math.abs(it.endMs - r.endMs) }?.endMs ?: r.endMs
+        return Range((start - 100).coerceAtLeast(0), maxOf(end + 150, start + 500))
     }
 
     /** Moves a range's edges to the nearest sentence start/end in the transcript (within a few seconds). */
@@ -161,7 +171,8 @@ $extra
         return Range(start, (end + 300).coerceAtLeast(start + 1000))
     }
 
-    data class Item(val range: Range, val label: String)
+    /** [range] spans all [pieces]; a short may be several pieces joined. */
+    data class Item(val range: Range, val label: String, val pieces: List<Range> = listOf(range))
 
     data class Result(
         val deletes: List<Item>,
@@ -261,7 +272,7 @@ $extra
             if (noBullet.startsWith("(") && noBullet.endsWith(")")) continue // instruction echo
             val times = timeRe.findAll(noBullet).toList()
             when (sec) {
-                Sec.DELETE, Sec.SHORTS -> {
+                Sec.DELETE -> {
                     // several items may arrive on one line when line breaks were lost in copying
                     val ms = rangeRe.findAll(noBullet).toList()
                     ms.forEachIndexed { i, m ->
@@ -269,9 +280,24 @@ $extra
                         val b = parseTime(m.groupValues[2])
                         val end = if (i + 1 < ms.size) ms[i + 1].range.first else noBullet.length
                         val label = tidy(noBullet.substring(m.range.last + 1, end))
-                        if (b > a) {
-                            val item = Item(Range(a, b), label)
-                            if (sec == Sec.DELETE) deletes.add(item) else shorts.add(item)
+                        if (b > a) deletes.add(Item(Range(a, b), label))
+                    }
+                }
+                Sec.SHORTS -> {
+                    // ranges joined by "+" belong to the same short; a label between ranges starts a new short
+                    val ms = rangeRe.findAll(noBullet).toList()
+                    var cur = ArrayList<Range>()
+                    ms.forEachIndexed { i, m ->
+                        val a = parseTime(m.groupValues[1])
+                        val b = parseTime(m.groupValues[2])
+                        if (b > a) cur.add(Range(a, b))
+                        val end = if (i + 1 < ms.size) ms[i + 1].range.first else noBullet.length
+                        val gap = noBullet.substring(m.range.last + 1, end)
+                        val joinOnly = i + 1 < ms.size && gap.trim().trim('+', ',', '&', ' ').isEmpty()
+                        if (!joinOnly && cur.isNotEmpty()) {
+                            val ps = cur.sortedBy { it.startMs }
+                            shorts.add(Item(Range(ps.first().startMs, ps.maxOf { it.endMs }), tidy(gap), ps))
+                            cur = ArrayList()
                         }
                     }
                 }

@@ -49,6 +49,11 @@ data class ShortClip(
     val about: String = "",
     /** Leave out the parts that were removed from the long video (the cut list). */
     val followCuts: Boolean = true,
+    /**
+     * The pieces joined into this short (original timeline). Empty or one piece = the plain range [startMs, endMs].
+     * startMs/endMs always span from the first piece to the last.
+     */
+    val pieces: List<Range> = emptyList(),
     /** Gallery uri of the last export of this short. */
     val outputUri: String? = null,
     val youtubeId: String? = null,

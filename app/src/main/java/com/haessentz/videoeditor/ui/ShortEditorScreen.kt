@@ -79,6 +79,11 @@ import com.haessentz.videoeditor.data.Project
 import com.haessentz.videoeditor.data.ProjectStore
 import com.haessentz.videoeditor.data.Seg
 import com.haessentz.videoeditor.data.ShortClip
+import com.haessentz.videoeditor.data.withPieces
+import com.haessentz.videoeditor.data.outLengthMs
+import com.haessentz.videoeditor.data.removedRel
+import com.haessentz.videoeditor.data.keep
+import com.haessentz.videoeditor.data.Range
 import com.haessentz.videoeditor.data.SubStyle
 import com.haessentz.videoeditor.data.fmtMs
 import com.haessentz.videoeditor.media.SubtitleRenderer
@@ -120,10 +125,11 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
     val rel = player.positionMs - s.startMs
     LaunchedEffect(player.positionMs) {
         if (player.playing && player.positionMs >= s.endMs) player.seek(s.startMs)
-        // jump over parts removed from the long video, like the export does
-        if (player.playing && s.followCuts) {
-            p.cutList.firstOrNull { player.positionMs >= it.startMs && player.positionMs < it.endMs - 150 && it.endMs > s.startMs && it.startMs < s.endMs }
-                ?.let { player.seek(it.endMs) }
+        // jump over skipped sentences and parts removed from the long video, like the export does
+        if (player.playing) {
+            val relNow = player.positionMs - s.startMs
+            s.removedRel(p.cutList).firstOrNull { relNow >= it.startMs && relNow < it.endMs - 120 }
+                ?.let { player.seek(s.startMs + it.endMs) }
         }
     }
     var dragCrop by remember(sid) { mutableStateOf<Float?>(null) }
@@ -150,7 +156,9 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
                     onCropDragEnd = { dragCrop?.let { v -> save { it.copy(cropX = v, framed = true) } }; dragCrop = null })
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("${fmtMs(rel.coerceAtLeast(0), true)} / ${fmtMs(s.endMs - s.startMs, true)}", fontWeight = FontWeight.Bold)
+                    val removedNow = s.removedRel(p.cutList)
+                    Text("${fmtMs(com.haessentz.videoeditor.data.AiImport.mapTime(rel.coerceAtLeast(0), removedNow), true)} / ${fmtMs(s.outLengthMs(p.cutList), true)}", fontWeight = FontWeight.Bold)
+                    if (s.pieces.size > 1) Text("${s.pieces.size} קטעים מחוברים", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                     Row {
                         IconButton(onClick = {
                             if (player.positionMs < s.startMs || player.positionMs >= s.endMs) player.seek(s.startMs) else player.toggle()
@@ -202,14 +210,16 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
             }
             }
             TabRow(selectedTabIndex = tab) {
-                Tab(tab == 0, { tab = 0 }, text = { Text("כתוביות") })
-                Tab(tab == 1, { tab = 1 }, text = { Text("עיצוב") })
-                Tab(tab == 2, { tab = 2 }, text = { Text("מסגור") })
+                Tab(tab == 0, { tab = 0 }, text = { Text("משפטים") })
+                Tab(tab == 1, { tab = 1 }, text = { Text("כתוביות") })
+                Tab(tab == 2, { tab = 2 }, text = { Text("עיצוב") })
+                Tab(tab == 3, { tab = 3 }, text = { Text("מסגור") })
             }
             Box(Modifier.weight(1f)) {
                 when (tab) {
-                    0 -> CuesEditor(p, s, player, rel, ::save)
-                    1 -> StyleEditor(s, ::save, regenerate = { words ->
+                    0 -> SentencesEditor(p, s, player, ::save)
+                    1 -> CuesEditor(p, s, player, rel, ::save)
+                    2 -> StyleEditor(s, ::save, regenerate = { words ->
                         save { it.copy(cues = Cues.forClip(p.transcript, it.startMs, it.endMs, words), style = it.style.copy(maxWords = words)) }
                     }, hasTranscript = p.transcript.isNotEmpty())
                     else -> FrameEditor(p, s, ::save)
@@ -232,6 +242,14 @@ fun ShortEditorScreen(pid: String, sid: String, nav: Nav) {
 
 /** Changing the range keeps hand-edited cues but drops those that fall outside, and shifts their times. */
 private fun ShortClip.withRange(start: Long, end: Long, p: Project): ShortClip {
+    if (pieces.size > 1) {
+        // move the outer edges of the first and last pieces; drop pieces that fall outside
+        val ps = keep().filter { it.endMs > start && it.startMs < end }.toMutableList()
+        if (ps.isEmpty()) return copy(pieces = emptyList()).withRange(start, end, p)
+        ps[0] = Range(start, ps[0].endMs.coerceAtLeast(start + 300))
+        ps[ps.lastIndex] = Range(ps.last().startMs.coerceAtMost(end - 300), end)
+        return withPieces(ps, p.transcript)
+    }
     val shift = startMs - start
     val moved = cues.map { it.copy(startMs = it.startMs + shift, endMs = it.endMs + shift) }
         .filter { it.endMs > 0 && it.startMs < end - start }
@@ -241,6 +259,97 @@ private fun ShortClip.withRange(start: Long, end: Long, p: Project): ShortClip {
         moved.none { m -> c.startMs < m.endMs && c.endMs > m.startMs }
     }
     return copy(startMs = start, endMs = end, cues = (moved + extra).sortedBy { it.startMs })
+}
+
+/**
+ * The short as a list of sentences: tick the ones that belong in the short, untick filler.
+ * Nearby sentences (before and after) are listed too, so the short can be extended.
+ * Below: each joined piece with fine start/end nudges.
+ */
+@Composable
+private fun SentencesEditor(p: Project, s: ShortClip, player: PlayerState, save: ((ShortClip) -> ShortClip) -> Unit) {
+    if (p.transcript.isEmpty()) {
+        Text("אין תמלול לסרטון הזה, אז אי אפשר לבחור משפטים. אפשר לכוון את ההתחלה והסוף למעלה.", Modifier.padding(12.dp),
+            style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val keep = s.keep()
+    val ctxMs = 25_000L
+    val idxs = p.transcript.indices.filter { p.transcript[it].endMs > s.startMs - ctxMs && p.transcript[it].startMs < s.endMs + ctxMs }
+    fun included(i: Int): Boolean {
+        val sg = p.transcript[i]; val mid = (sg.startMs + sg.endMs) / 2
+        return keep.any { mid >= it.startMs && mid < it.endMs }
+    }
+    fun rebuild(sel: Set<Int>) {
+        if (sel.isEmpty()) return
+        val sorted = sel.sorted()
+        val ranges = ArrayList<Range>()
+        var a = sorted.first(); var b = a
+        for (i in sorted.drop(1)) { if (i == b + 1) b = i else { ranges.add(Range(p.transcript[a].startMs, p.transcript[b].endMs)); a = i; b = i } }
+        ranges.add(Range(p.transcript[a].startMs, p.transcript[b].endMs))
+        val padded = ranges.map { Range((it.startMs - 100).coerceAtLeast(0), (it.endMs + 150).coerceAtMost(p.durationMs)) }
+        save { it.withPieces(padded, p.transcript) }
+    }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(8.dp)) {
+        item {
+            Text("סמן את המשפטים שנכנסים לשורט. בטל סימון של משפטים ומילים מיותרים באמצע — השורט יחבר את השאר. " +
+                    "שים לב: שינוי כאן בונה מחדש את הכתוביות.",
+                Modifier.padding(4.dp), style = MaterialTheme.typography.labelSmall)
+        }
+        items(idxs.size) { k ->
+            val i = idxs[k]
+            val sg = p.transcript[i]
+            val inc = included(i)
+            val outside = sg.endMs <= s.startMs || sg.startMs >= s.endMs
+            val playingNow = player.positionMs >= sg.startMs && player.positionMs < sg.endMs
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(if (playingNow) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
+                    .padding(vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                androidx.compose.material3.Checkbox(inc, { v ->
+                    val sel = idxs.filter { included(it) }.toMutableSet()
+                    if (v) sel.add(i) else sel.remove(i)
+                    rebuild(sel)
+                })
+                Column(Modifier.weight(1f).clickable { player.seek(sg.startMs) }) {
+                    Text(fmtMs(sg.startMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(sg.text, style = MaterialTheme.typography.bodySmall,
+                        color = if (inc) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (outside) 0.5f else 0.75f),
+                        textDecoration = if (!inc && !outside) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                }
+            }
+        }
+        if (keep.size > 1) {
+            item {
+                Text("הקטעים בשורט (כיוון עדין):", Modifier.padding(top = 10.dp, start = 4.dp), fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.labelLarge)
+            }
+            items(keep.size) { j ->
+                val pc = keep[j]
+                fun upd(f: (Range) -> Range) = save { it.withPieces(keep.mapIndexed { x, r -> if (x == j) f(r) else r }, p.transcript) }
+                Card(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                    Column(Modifier.padding(8.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("קטע ${j + 1}: ${fmtMs(pc.startMs, true)} – ${fmtMs(pc.endMs, true)}", Modifier.weight(1f),
+                                style = MaterialTheme.typography.labelMedium)
+                            IconButton(onClick = { player.seek(pc.startMs) }, Modifier.size(32.dp)) { Icon(Icons.Default.PlayArrow, "נגן") }
+                            IconButton(onClick = { save { it.withPieces(keep.filterIndexed { x, _ -> x != j }, p.transcript) } }, Modifier.size(32.dp)) {
+                                Icon(Icons.Default.Delete, "מחק")
+                            }
+                        }
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SmallBtn("התחלה ‎-0.3") { upd { Range((it.startMs - 300).coerceAtLeast(0), it.endMs) } }
+                            SmallBtn("התחלה ‎+0.3") { upd { Range((it.startMs + 300).coerceAtMost(it.endMs - 300), it.endMs) } }
+                            SmallBtn("סוף ‎-0.3") { upd { Range(it.startMs, (it.endMs - 300).coerceAtLeast(it.startMs + 300)) } }
+                            SmallBtn("סוף ‎+0.3") { upd { Range(it.startMs, it.endMs + 300) } }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable

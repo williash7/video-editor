@@ -88,3 +88,34 @@ object Cues {
         return sb.toString()
     }
 }
+
+/** The parts of the original that go into the short, in order. */
+fun ShortClip.keep(): List<Range> =
+    if (pieces.size > 1) pieces.sortedBy { it.startMs } else listOf(Range(startMs, endMs))
+
+/** The skipped parts between pieces, relative to [ShortClip.startMs]. */
+fun ShortClip.gapsRel(): List<Range> {
+    if (pieces.size <= 1) return emptyList()
+    val k = keep().map { Range(it.startMs - startMs, it.endMs - startMs) }
+    return Ranges.complement(k, endMs - startMs, minKeepMs = 1)
+}
+
+/** Everything left out of the short (gaps between pieces + parts cut from the long video), relative to its start. */
+fun ShortClip.removedRel(cutList: List<Range>): List<Range> {
+    val cuts = if (followCuts) cutList.filter { it.endMs > startMs && it.startMs < endMs }
+        .map { Range(it.startMs.coerceAtLeast(startMs) - startMs, it.endMs.coerceAtMost(endMs) - startMs) } else emptyList()
+    return Ranges.normalize(cuts + gapsRel(), endMs - startMs)
+}
+
+/** Length of the finished short. */
+fun ShortClip.outLengthMs(cutList: List<Range>): Long = (endMs - startMs) - removedRel(cutList).sumOf { it.lengthMs }
+
+/** Builds a short (pieces, span, subtitles) from a list of pieces. */
+fun ShortClip.withPieces(newPieces: List<Range>, transcript: List<Seg>): ShortClip {
+    val ps = Ranges.normalize(newPieces, Long.MAX_VALUE / 4)
+    if (ps.isEmpty()) return this
+    val start = ps.first().startMs
+    val end = ps.last().endMs
+    return copy(startMs = start, endMs = end, pieces = if (ps.size > 1) ps else emptyList(),
+        cues = Cues.forClip(transcript, start, end, style.maxWords))
+}

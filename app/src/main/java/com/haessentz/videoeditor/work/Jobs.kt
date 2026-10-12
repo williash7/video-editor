@@ -12,6 +12,7 @@ import com.haessentz.videoeditor.data.Range
 import com.haessentz.videoeditor.data.Ranges
 import com.haessentz.videoeditor.data.Seg
 import com.haessentz.videoeditor.data.fileTime
+import com.haessentz.videoeditor.data.removedRel
 import com.haessentz.videoeditor.media.AudioExtractor
 import com.haessentz.videoeditor.media.MediaSaver
 import com.haessentz.videoeditor.media.ModelManager
@@ -240,22 +241,19 @@ object Jobs {
                 ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(cropX = cropX, framed = true) else it }) }
             }
             val cues = if (s.subtitles) s.cues else null
-            // parts of the cut list that fall inside this short, relative to its start
-            val inner = if (s.followCuts) Ranges.normalize(
-                p.cutList.filter { it.endMs > s.startMs && it.startMs < s.endMs }
-                    .map { Range(it.startMs.coerceAtLeast(s.startMs) - s.startMs, it.endMs.coerceAtMost(s.endMs) - s.startMs) },
-                s.endMs - s.startMs) else emptyList()
+            // gaps between pieces + parts cut from the long video, relative to the short's start
+            val inner = s.removedRel(p.cutList)
             val shortNotes = if (p.burnNotes) com.haessentz.videoeditor.data.notesForClip(p.notes, s.startMs, s.endMs, inner) else emptyList()
             val o = if (inner.isEmpty()) {
                 val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs, shortNotes)
                 runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
             } else {
                 // 1) join the kept pieces, 2) crop + subtitles on the joined clip (cue times shifted to match)
-                js.progress(0f, "מוציא מהשורט ${inner.size} קטעים שנמחקו…")
+                js.progress(0f, "מחבר את קטעי השורט…")
                 val keep = Ranges.complement(inner, s.endMs - s.startMs, minKeepMs = 100).map { Range(it.startMs + s.startMs, it.endMs + s.startMs) }
                 val joined = File(ctx.cacheDir, "short_join_${System.currentTimeMillis()}.mp4")
                 try {
-                    VideoExporter.export(ctx, Uri.parse(p.videoUri), keep, emptyList(), joined) { f -> js.progress(0.4f * f, "מוציא קטעים שנמחקו… ${(f * 100).toInt()}%") }
+                    VideoExporter.export(ctx, Uri.parse(p.videoUri), keep, emptyList(), joined) { f -> js.progress(0.4f * f, "מחבר את קטעי השורט… ${(f * 100).toInt()}%") }
                     val len = keep.sumOf { it.lengthMs }
                     val mapped = cues?.map {
                         com.haessentz.videoeditor.data.Seg(

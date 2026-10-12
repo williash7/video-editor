@@ -6,7 +6,7 @@ sealed class Cmd {
     data class Cut(val ranges: List<Range>) : Cmd()
     data class Keep(val ranges: List<Range>) : Cmd()
     data class Remove(val ranges: List<Range>, val exportNow: Boolean) : Cmd()
-    data class Short(val ranges: List<Range>, val subtitles: Boolean) : Cmd()
+    data class Short(val ranges: List<Range>, val subtitles: Boolean, val joined: Boolean = false) : Cmd()
     data class Silence(val minMs: Long) : Cmd()
     data class Split(val partMs: Long) : Cmd()
     data class Search(val query: String) : Cmd()
@@ -105,7 +105,7 @@ object CommandParser {
         if (ranges.any { it.endMs <= it.startMs }) return Cmd.Error("זמן הסיום חייב להיות אחרי זמן ההתחלה.")
 
         return when {
-            isShort -> Cmd.Short(ranges, subtitles = !has(t, "בלי כתוביות", "ללא כתוביות"))
+            isShort -> Cmd.Short(ranges, subtitles = !has(t, "בלי כתוביות", "ללא כתוביות"), joined = t.contains('+'))
             isRemove -> Cmd.Remove(ranges, exportNow = isExport)
             isKeep -> Cmd.Keep(ranges)
             else -> Cmd.Cut(ranges)
@@ -176,6 +176,7 @@ object CommandParser {
 📱 שורטים:
 • שורט 12:30-13:30  (אנכי, עם כתוביות אם יש תמלול)
 • שורט 12:30-13:30 בלי כתוביות
+• שורט 12:30-12:50 + 13:10-13:40  (שורט אחד מכמה קטעים)
 • פצל לקטעים של 10 דקות
 
 📝 תמלול וכתוביות:

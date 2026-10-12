@@ -11,6 +11,7 @@ import com.haessentz.videoeditor.data.Ranges
 import com.haessentz.videoeditor.data.ShortClip
 import com.haessentz.videoeditor.data.SubStyle
 import com.haessentz.videoeditor.data.fmtMs
+import com.haessentz.videoeditor.data.withPieces
 import com.haessentz.videoeditor.media.MediaSaver
 import com.haessentz.videoeditor.work.Jobs
 import java.util.UUID
@@ -103,7 +104,12 @@ object CommandRunner {
                 validate(cmd.ranges, dur)?.let { return r(it) }
                 val noTranscript = p.transcript.isEmpty()
                 val style = SubStyle()
-                val created = cmd.ranges.mapIndexed { i, rg ->
+                val created = if (cmd.joined && cmd.ranges.size > 1) {
+                    listOf(ShortClip(
+                        id = UUID.randomUUID().toString(), name = "שורט ${p.shorts.size + 1}",
+                        startMs = 0, endMs = 1, subtitles = cmd.subtitles && !noTranscript, style = style,
+                    ).withPieces(cmd.ranges.map { Range(it.startMs, it.endMs.coerceAtMost(dur)) }, p.transcript))
+                } else cmd.ranges.mapIndexed { i, rg ->
                     ShortClip(
                         id = UUID.randomUUID().toString(),
                         name = "שורט ${p.shorts.size + i + 1}",
@@ -120,7 +126,8 @@ object CommandRunner {
                     noTranscript -> "\nאין עדיין תמלול, אז השורט ייצא בלי כתוביות. כדי לקבל כתוביות: כתוב \"תמלל\", ואחר כך ייצא שוב מלשונית שורטים."
                     else -> "\nאפשר לערוך את הכתוביות והעיצוב בלשונית שורטים ולייצא שוב."
                 }
-                r("יוצר ${created.size} שורט: ${cmd.ranges.joinToString(", ") { fmt(it) }}$note")
+                r((if (cmd.joined && cmd.ranges.size > 1) "יוצר שורט אחד מ־${cmd.ranges.size} קטעים: " else "יוצר ${created.size} שורט: ") +
+                        "${cmd.ranges.joinToString(if (cmd.joined) " + " else ", ") { fmt(it) }}$note")
             }
 
             is Cmd.Search -> {

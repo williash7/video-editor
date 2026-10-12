@@ -330,9 +330,15 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
     // "title | about" → separate fields; times snapped to sentence boundaries
     val shortTitles = remember(r) { mutableStateListOf(*r.shorts.map { it.label.substringBefore(" | ").trim() }.toTypedArray()) }
     val shortAbout = remember(r) { r.shorts.map { if (it.label.contains(" | ")) it.label.substringAfter(" | ").trim() else "" } }
-    val shortRanges = remember(r, p.transcript) {
-        r.shorts.map { AiImport.snapToSentences(Range(it.range.startMs, it.range.endMs.coerceAtMost(p.durationMs)), p.transcript) }
+    // each short = one or more pieces, snapped to the transcript lines
+    val shortPieces = remember(r, p.transcript) {
+        r.shorts.map { item ->
+            val ps = item.pieces.map { Range(it.startMs, it.endMs.coerceAtMost(p.durationMs)) }.filter { it.endMs > it.startMs }
+            if (ps.size <= 1) listOf(AiImport.snapToSentences(ps.firstOrNull() ?: item.range, p.transcript))
+            else Ranges.normalize(ps.map { AiImport.snapPiece(it, p.transcript) }, p.durationMs)
+        }
     }
+    val shortRanges = shortPieces.map { Range(it.first().startMs, it.last().endMs) }
     val chapNames = remember(r) { mutableStateListOf(*r.chapters.map { it.title }.toTypedArray()) }
     val noteSel = remember(r) { mutableStateListOf(*Array(r.notes.size) { true }) }
     val noteTexts = remember(r) { mutableStateListOf(*r.notes.map { it.text }.toTypedArray()) }
@@ -368,12 +374,14 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(shortSel[i], { v -> shortSel[i] = v })
                         Column(Modifier.weight(1f)) {
-                            Text("${fmtMs(rg.startMs)}–${fmtMs(rg.endMs)} (${rg.lengthMs / 1000} שנ׳)",
+                            val ps = shortPieces[i]
+                            Text(if (ps.size > 1) "${ps.size} קטעים מחוברים · ${ps.sumOf { it.lengthMs } / 1000} שנ׳ · ${fmtMs(rg.startMs)}–${fmtMs(rg.endMs)}"
+                                else "${fmtMs(rg.startMs)}–${fmtMs(rg.endMs)} (${rg.lengthMs / 1000} שנ׳)",
                                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
                             OutlinedTextField(shortTitles[i], { v -> shortTitles[i] = v }, Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall, singleLine = true)
                             if (shortAbout[i].isNotBlank()) Text(shortAbout[i], style = MaterialTheme.typography.bodySmall)
-                            Text("״" + shortText(p, rg).take(160) + "…״", style = MaterialTheme.typography.labelSmall,
+                            Text("״" + shortPieces[i].joinToString(" … ") { shortText(p, it) }.take(200) + "״", style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         PlayBtn { player.seek(rg.startMs) }
@@ -432,6 +440,7 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                         id = UUID.randomUUID().toString(),
                         name = t.ifBlank { "שורט" }.take(40),
                         startMs = rg.startMs, endMs = rg.endMs,
+                        pieces = if (shortPieces[i].size > 1) shortPieces[i] else emptyList(),
                         cues = Cues.forClip(p.transcript, rg.startMs, rg.endMs, style.maxWords),
                         subtitles = true, style = style, title = t, about = shortAbout[i],
                     )

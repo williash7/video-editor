@@ -87,6 +87,8 @@ import com.haessentz.videoeditor.data.Prefs
 import com.haessentz.videoeditor.data.Project
 import com.haessentz.videoeditor.data.ProjectStore
 import com.haessentz.videoeditor.data.Range
+import com.haessentz.videoeditor.data.outLengthMs
+import com.haessentz.videoeditor.data.keep
 import com.haessentz.videoeditor.data.Ranges
 import com.haessentz.videoeditor.data.Seg
 import com.haessentz.videoeditor.data.ShortClip
@@ -413,14 +415,13 @@ private fun ShortsTab(p: Project, player: PlayerState, nav: Nav) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
                     Text(s.name, fontWeight = FontWeight.Bold)
-                    val cutInside = p.cutList.filter { it.endMs > s.startMs && it.startMs < s.endMs }
-                        .sumOf { minOf(it.endMs, s.endMs) - maxOf(it.startMs, s.startMs) }
-                    Text("${fmtMs(s.startMs)} – ${fmtMs(s.endMs)} · ${(s.endMs - s.startMs - if (s.followCuts) cutInside else 0) / 1000} שניות · " +
-                            (if (s.subtitles) "${s.cues.size} כתוביות" else "בלי כתוביות") +
-                            (if (s.followCuts && cutInside > 0) " · בלי ${cutInside / 1000} שנ׳ שנמחקו" else ""),
+                    val outLen = s.outLengthMs(p.cutList)
+                    Text("${fmtMs(s.startMs)} – ${fmtMs(s.endMs)} · ${outLen / 1000} שניות" +
+                            (if (s.pieces.size > 1) " · ${s.pieces.size} קטעים מחוברים" else "") +
+                            " · " + (if (s.subtitles) "${s.cues.size} כתוביות" else "בלי כתוביות"),
                         style = MaterialTheme.typography.bodySmall)
                     if (s.about.isNotBlank()) Text(s.about, style = MaterialTheme.typography.bodySmall)
-                    val words = shortText(p, Range(s.startMs, s.endMs))
+                    val words = s.keep().joinToString(" … ") { shortText(p, it) }
                     if (words.isNotBlank()) Text("״" + words.take(180) + (if (words.length > 180) "…" else "") + "״",
                         style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -493,8 +494,10 @@ fun TimelineBar(p: Project, player: PlayerState) {
                     size = androidx.compose.ui.geometry.Size((x(r.endMs) - x(r.startMs)).coerceAtLeast(2f), h * 0.4f))
             }
             p.shorts.forEach { sh ->
-                drawRect(shortColor, topLeft = androidx.compose.ui.geometry.Offset(x(sh.startMs), h * 0.05f),
-                    size = androidx.compose.ui.geometry.Size((x(sh.endMs) - x(sh.startMs)).coerceAtLeast(3f), h * 0.2f))
+                sh.keep().forEach { pc ->
+                    drawRect(shortColor, topLeft = androidx.compose.ui.geometry.Offset(x(pc.startMs), h * 0.05f),
+                        size = androidx.compose.ui.geometry.Size((x(pc.endMs) - x(pc.startMs)).coerceAtLeast(3f), h * 0.2f))
+                }
             }
             val px = x(player.positionMs)
             drawRect(head, topLeft = androidx.compose.ui.geometry.Offset(px - 1.5f, 0f), size = androidx.compose.ui.geometry.Size(3f, h))
