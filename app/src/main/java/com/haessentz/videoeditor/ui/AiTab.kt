@@ -195,7 +195,8 @@ private fun shareAsFile(ctx: Context, p: Project) {
     ctx.startActivity(Intent.createChooser(i, "שלח לבינה").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
 
-private fun requestText(p: Project) = Prefs.aiPromptFor(p.language) + "\n\n" + AiImport.transcriptText(p.transcript)
+private fun requestText(p: Project) =
+    AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language) + "\n\n" + AiImport.transcriptText(p.transcript)
 
 private fun fixText(p: Project) = AiImport.fixPrompt(p.language) + "\n\n" + AiImport.fixLines(p.transcript)
 
