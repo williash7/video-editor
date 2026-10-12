@@ -265,7 +265,7 @@ object Jobs {
                         src = Uri.fromFile(joined))
                 } finally { joined.delete() }
             }
-            ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(outputUri = o.uri) else it }) }
+            ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(outputUri = o.uri, replaced = false) else it }) }
             addLog(pid, "השורט מוכן ✓ ${o.name}")
         }
     }
@@ -292,6 +292,39 @@ object Jobs {
     )
 
     fun accountOf(p: Project): String = p.youtube.account.ifBlank { Prefs.accountFor(p.language) }
+
+    /** The playlist the lesson goes to: chosen in the project, else the default saved for the channel + series. */
+    fun lessonPlaylist(p: Project): Pair<String, String>? = when (val id = p.youtube.playlistId) {
+        null -> if (p.series.isBlank()) null else Prefs.playlistFor(accountOf(p), p.series)
+        "" -> null
+        else -> id to p.youtube.playlistTitle
+    }
+    fun shortsPlaylist(p: Project): Pair<String, String>? = when (val id = p.youtube.shortsPlaylistId) {
+        null -> Prefs.playlistFor(accountOf(p), "shorts")
+        "" -> null
+        else -> id to p.youtube.shortsPlaylistTitle
+    }
+
+    private suspend fun addToPlaylist(ctx: Context, pid: String, account: String, token: String, videoId: String, pl: Pair<String, String>?) {
+        if (pl == null) return
+        val err = withContext(Dispatchers.IO) {
+            val t = runCatching { com.haessentz.videoeditor.media.YouTubeAuth.silentToken(ctx, account) }.getOrDefault(token)
+            com.haessentz.videoeditor.media.YouTubeReader.addToPlaylist(videoId, pl.first, t)
+        }
+        addLog(pid, err ?: "נוסף לפלייליסט \"${pl.second}\" ✓")
+    }
+
+    /** Adds an already-uploaded lesson (and its uploaded shorts) to the chosen playlists. */
+    fun addUploadedToPlaylists(ctx: Context, pid: String, token: String): String? {
+        val p = ProjectStore.get(pid) ?: return null
+        return JobManager.enqueue(ctx, "הוספה לפלייליסט", pid, kind = "upload") { js ->
+            js.progress(0f, "מוסיף לפלייליסט…")
+            val account = accountOf(p)
+            p.youtube.lastVideoId?.let { addToPlaylist(ctx, pid, account, token, it, lessonPlaylist(p)) }
+            val sp = shortsPlaylist(p)
+            if (sp != null) p.shorts.mapNotNull { it.youtubeId }.forEach { addToPlaylist(ctx, pid, account, token, it, sp) }
+        }
+    }
 
     fun uploadVideo(ctx: Context, pid: String, plan: UploadPlan, token: String): String? {
         val p = ProjectStore.get(pid) ?: return null
@@ -323,6 +356,7 @@ object Jobs {
                 }
                 if (err != null) addLog(pid, err)
             }
+            addToPlaylist(ctx, pid, account, token, id, lessonPlaylist(ProjectStore.get(pid) ?: p))
         }
     }
 
@@ -357,6 +391,7 @@ object Jobs {
             ) { f, d -> js.progress(f, d) }
             ProjectStore.update(pid) { pr -> pr.copy(shorts = pr.shorts.map { if (it.id == shortId) it.copy(youtubeId = id) else it }) }
             addLog(pid, "השורט הועלה ✓ https://youtube.com/shorts/$id")
+            addToPlaylist(ctx, pid, accountOf(p), token, id, shortsPlaylist(p))
         }
     }
 

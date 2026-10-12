@@ -57,6 +57,8 @@ data class ShortClip(
     /** Gallery uri of the last export of this short. */
     val outputUri: String? = null,
     val youtubeId: String? = null,
+    /** True when [outputUri] is a file loaded from outside (e.g. after adding illustrations), not our own export. */
+    val replaced: Boolean = false,
 )
 
 @Serializable
@@ -91,6 +93,11 @@ data class YoutubeMeta(
     val account: String = "",
     /** A prompt for an image generator, for the thumbnail (from the AI). */
     val imagePrompt: String = "",
+    /** Playlist for the lesson (null = the default saved for the series) and for its shorts; "" = none. */
+    val playlistId: String? = null,
+    val playlistTitle: String = "",
+    val shortsPlaylistId: String? = null,
+    val shortsPlaylistTitle: String = "",
 )
 
 /** A factual correction shown on screen (an asterisk with the fix) at [ms] on the original timeline. */

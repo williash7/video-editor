@@ -77,6 +77,14 @@ object Prefs {
     fun lastLessonNo(series: String): Int = sp.getInt("lesson_$series", Series.knownLast[series] ?: 0)
     fun setLastLessonNo(series: String, n: Int) = sp.edit().putInt("lesson_$series", n.coerceAtLeast(0)).apply()
 
+    /** Default playlist per channel + series ("shorts" for the shorts), as id and title. */
+    fun playlistFor(account: String, key: String): Pair<String, String>? {
+        val id = sp.getString("pl_${account}_$key", null) ?: return null
+        return id to (sp.getString("plt_${account}_$key", "") ?: "")
+    }
+    fun setPlaylistFor(account: String, key: String, id: String, title: String) =
+        sp.edit().putString("pl_${account}_$key", id).putString("plt_${account}_$key", title).apply()
+
     /** Reference photos sent along with every image prompt (files in filesDir/ref). */
     fun refImages(ctx: Context): List<java.io.File> =
         (java.io.File(ctx.filesDir, "ref").listFiles() ?: emptyArray()).filter { it.isFile }.sortedBy { it.name }

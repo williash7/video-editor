@@ -33,7 +33,8 @@ import java.net.URL
 import java.nio.ByteBuffer
 
 object YouTubeAuth {
-    private const val SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+    /** Full YouTube access: upload, thumbnails and adding videos to playlists. */
+    private const val SCOPE = "https://www.googleapis.com/auth/youtube"
     const val READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 
     private fun request(account: String?, scope: String = SCOPE) = AuthorizationRequest.builder()
@@ -356,6 +357,48 @@ object YouTubeReader {
             }
             return JSONObject(c.inputStream.bufferedReader().readText())
         } finally { c.disconnect() }
+    }
+
+    data class Playlist(val id: String, val title: String, val count: Int)
+
+    /** The channel's playlists. */
+    fun playlists(token: String): List<Playlist> {
+        val out = ArrayList<Playlist>()
+        var page: String? = null
+        do {
+            val r = get("https://www.googleapis.com/youtube/v3/playlists?part=snippet,contentDetails&mine=true&maxResults=50" +
+                    (page?.let { "&pageToken=$it" } ?: ""), token)
+            val arr = r.optJSONArray("items")
+            if (arr != null) for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                out.add(Playlist(o.getString("id"), o.getJSONObject("snippet").optString("title"),
+                    o.optJSONObject("contentDetails")?.optInt("itemCount") ?: 0))
+            }
+            page = r.optString("nextPageToken").ifBlank { null }
+        } while (page != null && out.size < 500)
+        return out
+    }
+
+    /** Adds a video to a playlist; returns an error message or null. */
+    fun addToPlaylist(videoId: String, playlistId: String, token: String): String? {
+        val body = JSONObject().put("snippet", JSONObject().put("playlistId", playlistId)
+            .put("resourceId", JSONObject().put("kind", "youtube#video").put("videoId", videoId))).toString().toByteArray()
+        val c = (URL("https://www.googleapis.com/youtube/v3/playlistItems?part=snippet").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"; doOutput = true
+            setRequestProperty("Authorization", "Bearer $token")
+            setRequestProperty("Content-Type", "application/json; charset=UTF-8")
+            connectTimeout = 20_000; readTimeout = 30_000
+        }
+        return try {
+            c.outputStream.use { it.write(body) }
+            val code = c.responseCode
+            if (code in 200..299) null else {
+                val err = runCatching { c.errorStream?.bufferedReader()?.readText() }.getOrNull() ?: ""
+                if (code == 403 && err.contains("insufficient", true))
+                    "ההוספה לפלייליסט נכשלה: חסרה הרשאה. לחץ שוב על \"העלה\" או \"הוסף לפלייליסט\" ואשר את ההרשאה החדשה."
+                else "ההוספה לפלייליסט נכשלה (שגיאה $code)."
+            }
+        } catch (e: Exception) { "ההוספה לפלייליסט נכשלה: ${e.message}" } finally { c.disconnect() }
     }
 
     /** All upload titles (newest first), up to [max]. */

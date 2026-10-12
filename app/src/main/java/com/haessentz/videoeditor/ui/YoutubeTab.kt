@@ -134,6 +134,47 @@ fun YoutubeTab(p: Project, player: PlayerState) {
             if (ok) { save { it.copy(hasThumb = true) }; thumbVersion++ } else error = "לא הצלחתי לטעון את התמונה."
         }
     }
+    // ---- playlists
+    var plTarget by remember { mutableStateOf<String?>(null) } // "lesson" / "shorts"
+    var playlists by remember(Jobs.accountOf(p)) { mutableStateOf<List<com.haessentz.videoeditor.media.YouTubeReader.Playlist>?>(null) }
+    var plLoading by remember { mutableStateOf(false) }
+    fun choosePlaylist(target: String) {
+        plTarget = target
+        if (playlists != null) return
+        plLoading = true
+        withToken { token ->
+            scope.launch {
+                val r = withContext(Dispatchers.IO) { runCatching { com.haessentz.videoeditor.media.YouTubeReader.playlists(token) } }
+                plLoading = false
+                r.onSuccess { playlists = it }.onFailure { plTarget = null; error = "לא הצלחתי לקרוא את הפלייליסטים: ${it.message}" }
+            }
+        }
+    }
+    fun setPlaylist(target: String, id: String, title: String) {
+        val acc = Jobs.accountOf(p)
+        if (target == "lesson") {
+            save { it.copy(playlistId = id, playlistTitle = title) }
+            if (id.isNotEmpty() && p.series.isNotBlank()) Prefs.setPlaylistFor(acc, p.series, id, title)
+        } else {
+            save { it.copy(shortsPlaylistId = id, shortsPlaylistTitle = title) }
+            if (id.isNotEmpty()) Prefs.setPlaylistFor(acc, "shorts", id, title)
+        }
+        plTarget = null
+    }
+
+    // ---- replacing a short's file with an edited one (e.g. with illustrations)
+    var replaceFor by remember { mutableStateOf<String?>(null) }
+    val pickShortFile = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        val sid = replaceFor
+        replaceFor = null
+        if (uri != null && sid != null) {
+            runCatching { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            ProjectStore.update(p.id) { pr ->
+                pr.copy(shorts = pr.shorts.map { if (it.id == sid) it.copy(outputUri = uri.toString(), replaced = true) else it })
+            }
+        }
+    }
+
     val thumb = remember(thumbVersion, yt.hasThumb) {
         Thumbs.finalFile(dir).takeIf { yt.hasThumb && it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() }
     }
@@ -158,6 +199,33 @@ fun YoutubeTab(p: Project, player: PlayerState) {
                         style = MaterialTheme.typography.labelSmall)
                     Text("החשבון צריך להיות מחובר בטלפון (הגדרות ← חשבונות), ומוגדר כמשתמש בדיקה ב־Google Cloud.",
                         style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        // ---- playlists
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("פלייליסט", fontWeight = FontWeight.Bold)
+                    val lp = Jobs.lessonPlaylist(p)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("השיעור: " + (lp?.second?.ifBlank { "נבחר" } ?: "ללא"), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { choosePlaylist("lesson") }) { Text("בחר") }
+                    }
+                    if (p.shorts.isNotEmpty()) {
+                        val sp = Jobs.shortsPlaylist(p)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("השורטים: " + (sp?.second?.ifBlank { "נבחר" } ?: "ללא"), Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            TextButton(onClick = { choosePlaylist("shorts") }) { Text("בחר") }
+                        }
+                    }
+                    Text(if (p.series.isNotBlank()) "הבחירה נשמרת לסדרה \"${p.series}\" בערוץ הזה, והשיעורים הבאים בה ייכנסו לאותו פלייליסט לבד."
+                        else "הסרטון ייכנס לפלייליסט מיד אחרי ההעלאה.", style = MaterialTheme.typography.labelSmall)
+                    if (yt.lastVideoId != null && (lp != null || Jobs.shortsPlaylist(p) != null)) {
+                        TextButton(enabled = !uploading, onClick = { withToken { token -> Jobs.addUploadedToPlaylists(ctx, p.id, token) } }) {
+                            Text("הוסף לפלייליסט את מה שכבר הועלה")
+                        }
+                    }
                 }
             }
         }
@@ -345,9 +413,15 @@ fun YoutubeTab(p: Project, player: PlayerState) {
                             if (p.shorts.any { it.youtubeId == null && it.outputUri == null })
                                 Text("שורטים שעוד לא יוצאו ייוצאו קודם, אוטומטית.", style = MaterialTheme.typography.labelSmall)
                         }
+                        Text("ערכת שורט מחוץ לאפליקציה (למשל הוספת איורים)? לחץ \"החלף קובץ\" ובחר את הקובץ החדש — הוא זה שיעלה ליוטיוב.",
+                            style = MaterialTheme.typography.labelSmall)
                         p.shorts.forEach { s ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(s.title.ifBlank { s.name }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                                Column(Modifier.weight(1f)) {
+                                    Text(s.title.ifBlank { s.name }, style = MaterialTheme.typography.bodySmall)
+                                    if (s.replaced) Text("🎨 קובץ שהוחלף", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                }
+                                if (s.youtubeId == null) TextButton(onClick = { replaceFor = s.id; pickShortFile.launch(arrayOf("video/*")) }) { Text("החלף קובץ") }
                                 when {
                                     s.youtubeId != null -> Row {
                                         TextButton(onClick = { open(ctx, "https://youtube.com/shorts/${s.youtubeId}") }) { Text("הועלה ✓") }
@@ -371,6 +445,28 @@ fun YoutubeTab(p: Project, player: PlayerState) {
             title = { Text("התיאור שיעלה ליוטיוב") },
             text = { LazyColumn { item { Text(finalDesc.ifBlank { "(ריק)" }, style = MaterialTheme.typography.bodySmall) } } },
             confirmButton = { TextButton(onClick = { showDesc = false }) { Text("סגור") } })
+    }
+    plTarget?.let { target ->
+        AlertDialog(onDismissRequest = { plTarget = null },
+            title = { Text(if (target == "lesson") "פלייליסט לשיעור" else "פלייליסט לשורטים") },
+            text = {
+                val list = playlists
+                if (list == null) Text(if (plLoading) "קורא את הפלייליסטים מהערוץ…" else "מתחבר לגוגל…")
+                else LazyColumn {
+                    item {
+                        TextButton(onClick = { setPlaylist(target, "", "") }) { Text("ללא פלייליסט") }
+                    }
+                    items(list.size) { i ->
+                        val pl = list[i]
+                        Row(Modifier.fillMaxWidth().clickable { setPlaylist(target, pl.id, pl.title) }.padding(vertical = 8.dp)) {
+                            Text(pl.title, Modifier.weight(1f))
+                            Text("${pl.count}", style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    if (list.isEmpty()) item { Text("אין פלייליסטים בערוץ הזה.") }
+                }
+            },
+            confirmButton = { TextButton(onClick = { plTarget = null }) { Text("סגור") } })
     }
     error?.let { m ->
         AlertDialog(onDismissRequest = { error = null }, text = { Text(m) },
