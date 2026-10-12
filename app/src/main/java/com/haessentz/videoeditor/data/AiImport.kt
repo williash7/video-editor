@@ -15,6 +15,10 @@ object AiImport {
 (3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
 מ:שש-מ:שש | כותרת לשורט | על מה השורט, במשפט אחד
 
+### תיקונים
+(רק אם נאמר בשיעור משהו שגוי עובדתית — מקור לא נכון, שם, תאריך, מספר או ציטוט מוטעה. לכל טעות: הזמן שבו נאמרה, ותיקון קצר שיופיע על המסך. אם אין טעויות — השאר ריק)
+מ:שש | התיקון בקצרה, למשל: המקור הוא תניא פרק כ"ו ולא כ"ה
+
 ### כותרת
 כותרת אחת מושכת לסרטון
 
@@ -42,6 +46,10 @@ object AiImport {
 ### שורטים
 (3 עד 5 קטעים חזקים של 30 עד 60 שניות. כל שורט חייב להתחיל בדיוק בזמן ההתחלה של שורה בתמלול, ולהסתיים בדיוק בזמן הסוף של שורה — כפי שמופיעים בסוגריים. שורט טוב פותח במשפט שמובן בלי הקשר — שאלה, טענה חדה או תחילת סיפור — ונגמר כשהרעיון נסגר. לא לכלול בשורט קטעים מרשימת המחיקה)
 מ:שש-מ:שש | כותרת לשורט ברוסית | על מה השורט, במשפט אחד בעברית
+
+### תיקונים
+(רק אם נאמר בשיעור משהו שגוי עובדתית — מקור לא נכון, שם, תאריך, מספר או ציטוט מוטעה. לכל טעות: הזמן שבו נאמרה, ותיקון קצר ברוסית שיופיע על המסך. אם אין טעויות — השאר ריק)
+מ:שש | התיקון בקצרה ברוסית
 
 ### כותרת
 כותרת אחת מושכת לסרטון, ברוסית
@@ -142,11 +150,12 @@ $extra
         val title: String,
         val description: String,
         val chapters: List<Chapter>,
+        val notes: List<FactNote> = emptyList(),
     ) {
-        val isEmpty get() = deletes.isEmpty() && shorts.isEmpty() && title.isBlank() && description.isBlank() && chapters.isEmpty()
+        val isEmpty get() = deletes.isEmpty() && shorts.isEmpty() && title.isBlank() && description.isBlank() && chapters.isEmpty() && notes.isEmpty()
     }
 
-    private enum class Sec { NONE, DELETE, SHORTS, TITLE, DESC, CHAPTERS }
+    private enum class Sec { NONE, DELETE, SHORTS, TITLE, DESC, CHAPTERS, NOTES }
 
     private val timeRe = Regex("""(?<![\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])""")
     private val bulletRe = Regex("""^\s*(?:[-*•▪◦>]+|\d+[.)])\s*""")
@@ -171,6 +180,7 @@ $extra
         if (!isMarked && !(t.endsWith(":") || (t.contains(':') && shortHead) || t.split(' ').size <= 2)) return null
         val h = head.lowercase()
         val sec = when {
+            h.contains("תיקונ") || h.contains("טעויות") || h.contains("исправ") || h.contains("поправ") || h.contains("ошиб") -> Sec.NOTES
             h.contains("удал") || h.contains("вырез") -> Sec.DELETE
             h.contains("шорт") -> Sec.SHORTS
             h.contains("глав") || h.contains("тайм") -> Sec.CHAPTERS
@@ -198,6 +208,7 @@ $extra
         val deletes = ArrayList<Item>()
         val shorts = ArrayList<Item>()
         val chapters = ArrayList<Chapter>()
+        val notes = ArrayList<FactNote>()
         var title = ""
         val desc = StringBuilder()
         var sec = Sec.NONE
@@ -252,12 +263,19 @@ $extra
                         if (name.isNotEmpty()) chapters.add(Chapter(parseTime(m.value), name))
                     }
                 }
+                Sec.NOTES -> if (times.isNotEmpty() && times[0].range.first <= 3) {
+                    val t = parseTime(times[0].value)
+                    // "m:ss-m:ss | text" is fine too: take the first time
+                    val after = if (times.size > 1 && times[1].range.first - times[0].range.last <= 3) times[1].range.last + 1 else times[0].range.last + 1
+                    val txt = tidy(noBullet.substring(after))
+                    if (txt.isNotEmpty()) notes.add(FactNote(t, txt))
+                }
                 Sec.TITLE -> if (title.isEmpty()) title = noBullet.trim('"', '\'', ' ')
                 Sec.DESC -> desc.append(line).append('\n')
                 Sec.NONE -> {}
             }
         }
-        return Result(deletes, shorts, title, desc.toString().trim(), chapters.sortedBy { it.ms })
+        return Result(deletes, shorts, title, desc.toString().trim(), chapters.sortedBy { it.ms }, notes.sortedBy { it.ms })
     }
 
     // ------------------------------------------------------------ chapter timing
@@ -306,3 +324,13 @@ $extra
         return (description.trim() + "\n\n" + ch).trim()
     }
 }
+
+/** How long a correction stays on screen. */
+fun noteDurationMs(text: String): Long = (4500L + text.length * 60L).coerceIn(5000L, 11000L)
+
+/** Notes as timed pieces for a clip [start, end] (times relative to start), optionally skipping removed parts. */
+fun notesForClip(notes: List<FactNote>, start: Long, end: Long, removedRel: List<Range> = emptyList()): List<Seg> =
+    notes.filter { it.ms in start until end }.map {
+        val a = AiImport.mapTime(it.ms - start, removedRel)
+        Seg(a, a + noteDurationMs(it.text), it.text)
+    }

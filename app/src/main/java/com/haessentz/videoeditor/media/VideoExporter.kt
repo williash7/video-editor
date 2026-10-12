@@ -92,7 +92,8 @@ object VideoExporter {
     }
 
     /** Effects for a vertical 9:16 short with optional burned-in subtitles. */
-    fun shortEffects(srcW: Int, srcH: Int, cropX: Float, cues: List<Seg>?, style: SubStyle, clipStartMs: Long): List<Effect> {
+    fun shortEffects(srcW: Int, srcH: Int, cropX: Float, cues: List<Seg>?, style: SubStyle, clipStartMs: Long,
+                     notes: List<Seg> = emptyList()): List<Effect> {
         val effects = ArrayList<Effect>()
         val outW = 1080
         val outH = 1920
@@ -104,11 +105,22 @@ object VideoExporter {
             effects.add(Crop(c - f, c + f, -1f, 1f))
         }
         effects.add(Presentation.createForWidthAndHeight(outW, outH, Presentation.LAYOUT_SCALE_TO_FIT_WITH_CROP))
-        if (!cues.isNullOrEmpty()) {
-            val overlay: TextureOverlay = SubtitleOverlay(cues, style, outW, outH, clipStartMs * 1000)
-            effects.add(OverlayEffect(ImmutableList.of(overlay)))
-        }
+        val overlays = ArrayList<TextureOverlay>()
+        if (!cues.isNullOrEmpty()) overlays.add(SubtitleOverlay(cues, style, outW, outH, clipStartMs * 1000))
+        if (notes.isNotEmpty()) overlays.add(NotesOverlay(notes, outW, outH, clipStartMs * 1000))
+        if (overlays.isNotEmpty()) effects.add(OverlayEffect(ImmutableList.copyOf(overlays)))
         return effects
+    }
+
+    /** Effects for burning factual corrections onto a normal (non-cropped) video that starts at 0. */
+    fun notesEffects(srcW: Int, srcH: Int, notes: List<Seg>): List<Effect> {
+        val scale = if (maxOf(srcW, srcH) > 1920) 1920f / maxOf(srcW, srcH) else 1f
+        val w = ((srcW * scale).toInt() / 2) * 2
+        val h = ((srcH * scale).toInt() / 2) * 2
+        return listOf(
+            Presentation.createForWidthAndHeight(w, h, Presentation.LAYOUT_SCALE_TO_FIT),
+            OverlayEffect(ImmutableList.of<TextureOverlay>(NotesOverlay(notes, w, h, 0))),
+        )
     }
 
     /** Effects for burning subtitles onto a normal (non-cropped) clip. */

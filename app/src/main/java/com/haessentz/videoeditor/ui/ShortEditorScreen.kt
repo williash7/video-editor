@@ -313,6 +313,13 @@ private fun ShortPreview(
                 drawIntoCanvas { c -> SubtitleRenderer.draw(c.nativeCanvas, cue.text, s.style, size.width.toInt(), size.height.toInt()) }
             }
         }
+        val absMs = s.startMs + relMs
+        val note = if (p.burnNotes) p.notes.firstOrNull { absMs >= it.ms && absMs < it.ms + com.haessentz.videoeditor.data.noteDurationMs(it.text) } else null
+        if (note != null) {
+            Canvas(Modifier.fillMaxSize()) {
+                drawIntoCanvas { c -> com.haessentz.videoeditor.media.NoteRenderer.draw(c.nativeCanvas, note.text, size.width.toInt(), size.height.toInt()) }
+            }
+        }
     }
 }
 

@@ -80,7 +80,7 @@ object CommandRunner {
             }
 
             Cmd.ExportCutList -> {
-                if (p.cutList.isEmpty()) r("רשימת החיתוך ריקה. קודם כתוב למשל: תוציא 10:00-12:30")
+                if (p.cutList.isEmpty() && (p.notes.isEmpty() || !p.burnNotes)) r("רשימת החיתוך ריקה. קודם כתוב למשל: תוציא 10:00-12:30")
                 else {
                     Jobs.exportCutList(ctx, pid)
                     r("מייצא את הסרטון בלי ${p.cutList.size} הקטעים שברשימה…")

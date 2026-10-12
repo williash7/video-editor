@@ -107,3 +107,64 @@ class SubtitleOverlay(
         return bmp
     }
 }
+
+/** Draws a factual correction near the top of the frame: a gold asterisk and the fix, on a dark box. */
+object NoteRenderer {
+    fun draw(canvas: Canvas, text: String, w: Int, h: Int) {
+        val t = text.trim()
+        if (t.isEmpty() || w <= 0 || h <= 0) return
+        val unit = minOf(w, h).toFloat()
+        val paint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = unit * 0.042f
+            typeface = Typeface.DEFAULT_BOLD
+            color = Color.WHITE
+        }
+        val star = "✱ "
+        val full = star + t
+        val maxW = (w * 0.86f).toInt().coerceAtLeast(1)
+        val layout = StaticLayout.Builder.obtain(full, 0, full.length, paint, maxW)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER).setIncludePad(false).setLineSpacing(0f, 1.08f).build()
+        var lineW = 0f
+        for (i in 0 until layout.lineCount) lineW = maxOf(lineW, layout.getLineWidth(i))
+        val padX = paint.textSize * 0.7f
+        val padY = paint.textSize * 0.45f
+        val top = h * 0.05f
+        val left = (w - lineW) / 2f - padX
+        val box = RectF(left, top, left + lineW + 2 * padX, top + layout.height + 2 * padY)
+        canvas.drawRoundRect(box, paint.textSize * 0.5f, paint.textSize * 0.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.argb(205, 20, 16, 12) })
+        canvas.drawRoundRect(box, paint.textSize * 0.5f, paint.textSize * 0.5f, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeWidth = paint.textSize * 0.08f; color = Color.rgb(232, 184, 101)
+        })
+        canvas.save()
+        canvas.translate((w - maxW) / 2f, top + padY)
+        layout.draw(canvas)
+        canvas.restore()
+    }
+}
+
+/** Media3 overlay for factual corrections; note times are relative to the clip start. */
+@UnstableApi
+class NotesOverlay(
+    private val notes: List<Seg>,
+    private val w: Int,
+    private val h: Int,
+    private val clipStartUs: Long,
+) : BitmapOverlay() {
+    private val empty: Bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    private var lastIdx = -2
+    private var lastBitmap: Bitmap = empty
+    private var offsetUs: Long = -1
+
+    override fun getBitmap(presentationTimeUs: Long): Bitmap {
+        if (offsetUs < 0) offsetUs = if (clipStartUs > 1_000_000 && presentationTimeUs >= clipStartUs - 500_000) clipStartUs else 0L
+        val tMs = (presentationTimeUs - offsetUs) / 1000
+        val idx = notes.indexOfFirst { tMs >= it.startMs && tMs < it.endMs }
+        if (idx != lastIdx) {
+            lastIdx = idx
+            lastBitmap = if (idx < 0) empty else Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+                NoteRenderer.draw(Canvas(it), notes[idx].text, w, h)
+            }
+        }
+        return lastBitmap
+    }
+}

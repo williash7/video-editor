@@ -86,6 +86,10 @@ data class YoutubeMeta(
     val account: String = "",
 )
 
+/** A factual correction shown on screen (an asterisk with the fix) at [ms] on the original timeline. */
+@Serializable
+data class FactNote(val ms: Long, val text: String)
+
 @Serializable
 data class Hit(val ms: Long, val label: String)
 
@@ -116,4 +120,7 @@ data class Project(
     val log: List<LogEntry> = emptyList(),
     val youtube: YoutubeMeta = YoutubeMeta(),
     val aiReply: String = "",
+    val notes: List<FactNote> = emptyList(),
+    /** Burn the factual corrections into exported videos. */
+    val burnNotes: Boolean = true,
 )

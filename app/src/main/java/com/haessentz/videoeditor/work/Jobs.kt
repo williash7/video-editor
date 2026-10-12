@@ -150,8 +150,22 @@ object Jobs {
         return JobManager.enqueue(ctx, title, pid, kind = "export") { js ->
             if (join) {
                 val removed = Ranges.complement(rs, p.durationMs, minKeepMs = 1)
-                val o = runExport(ctx, p, js, rs, emptyList(), "${p.name}_$label", kind = "edited", removed = removed)
-                addLog(pid, "מוכן ✓ ${o.name} נשמר בגלריה (תיקיית VideoEditor).")
+                val notes = if (p.burnNotes) p.notes.filter { n -> rs.any { n.ms in it.startMs until it.endMs } } else emptyList()
+                val o = if (notes.isEmpty()) {
+                    runExport(ctx, p, js, rs, emptyList(), "${p.name}_$label", kind = "edited", removed = removed)
+                } else {
+                    // 1) join the kept parts (fast), 2) draw the corrections on the joined video
+                    val joined = File(ctx.cacheDir, "join_${System.currentTimeMillis()}.mp4")
+                    try {
+                        VideoExporter.export(ctx, Uri.parse(p.videoUri), rs, emptyList(), joined) { f -> js.progress(0.3f * f, "מחבר קטעים… ${(f * 100).toInt()}%") }
+                        val mapped = com.haessentz.videoeditor.data.notesForClip(notes, 0, p.durationMs, removed)
+                        js.phase(0.3f, "מוסיף ${notes.size} תיקונים על המסך…")
+                        runExport(ctx, p, js, listOf(Range(0, p.durationMs - removed.sumOf { it.lengthMs })),
+                            VideoExporter.notesEffects(p.width, p.height, mapped), "${p.name}_$label", 0.3f, 1f,
+                            kind = "edited", removed = removed, src = Uri.fromFile(joined))
+                    } finally { joined.delete() }
+                }
+                addLog(pid, "מוכן ✓ ${o.name} נשמר בגלריה (תיקיית VideoEditor)." + if (notes.isNotEmpty()) " כולל ${notes.size} תיקונים על המסך." else "")
             } else {
                 rs.forEachIndexed { i, r ->
                     val o = runExport(ctx, p, js, listOf(r), emptyList(),
@@ -168,6 +182,7 @@ object Jobs {
         val p = ProjectStore.get(pid) ?: return null
         val keep = Ranges.complement(p.cutList, p.durationMs)
         if (keep.isEmpty()) return null
+        if (p.cutList.isEmpty() && (p.notes.isEmpty() || !p.burnNotes)) return null
         return exportRanges(ctx, pid, keep, join = true, label = "ערוך")
     }
 
@@ -230,8 +245,9 @@ object Jobs {
                 p.cutList.filter { it.endMs > s.startMs && it.startMs < s.endMs }
                     .map { Range(it.startMs.coerceAtLeast(s.startMs) - s.startMs, it.endMs.coerceAtMost(s.endMs) - s.startMs) },
                 s.endMs - s.startMs) else emptyList()
+            val shortNotes = if (p.burnNotes) com.haessentz.videoeditor.data.notesForClip(p.notes, s.startMs, s.endMs, inner) else emptyList()
             val o = if (inner.isEmpty()) {
-                val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs)
+                val effects = VideoExporter.shortEffects(p.width, p.height, cropX, cues, s.style, s.startMs, shortNotes)
                 runExport(ctx, p, js, listOf(Range(s.startMs, s.endMs)), effects, "${p.name}_${s.name}", kind = "short")
             } else {
                 // 1) join the kept pieces, 2) crop + subtitles on the joined clip (cue times shifted to match)
@@ -246,7 +262,7 @@ object Jobs {
                             com.haessentz.videoeditor.data.AiImport.mapTime(it.startMs, inner),
                             com.haessentz.videoeditor.data.AiImport.mapTime(it.endMs, inner), it.text)
                     }?.filter { it.endMs > it.startMs }
-                    val effects = VideoExporter.shortEffects(p.width, p.height, cropX, mapped, s.style, 0)
+                    val effects = VideoExporter.shortEffects(p.width, p.height, cropX, mapped, s.style, 0, shortNotes)
                     runExport(ctx, p, js, listOf(Range(0, len)), effects, "${p.name}_${s.name}", 0.4f, 1f, kind = "short",
                         src = Uri.fromFile(joined))
                 } finally { joined.delete() }

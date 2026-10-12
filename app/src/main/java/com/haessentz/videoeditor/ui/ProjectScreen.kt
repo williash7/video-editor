@@ -64,6 +64,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -134,6 +137,13 @@ fun ProjectScreen(pid: String, nav: Nav) {
         Column(Modifier.fillMaxSize().padding(pad).consumeWindowInsets(pad).imePadding()) {
             Box(Modifier.fillMaxWidth().height(210.dp).background(Color.Black)) {
                 VideoView(player, Modifier.fillMaxSize())
+                // preview of the on-screen corrections (an edited export already has them burned in)
+                if (source == null) {
+                    val note = p.notes.firstOrNull { player.positionMs >= it.ms && player.positionMs < it.ms + com.haessentz.videoeditor.data.noteDurationMs(it.text) }
+                    if (note != null) androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+                        drawIntoCanvas { c -> com.haessentz.videoeditor.media.NoteRenderer.draw(c.nativeCanvas, note.text, size.width.toInt(), size.height.toInt()) }
+                    }
+                }
             }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
@@ -364,12 +374,13 @@ private fun CutListTab(p: Project, player: PlayerState) {
             Text("מוציא ${fmtMs(removed)} · אורך אחרי עריכה: ${fmtMs(p.durationMs - removed)}", fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(enabled = p.cutList.isNotEmpty(), onClick = { CommandRunner.run(ctx, p.id, "ייצא") }) { Text("ייצא סרטון ערוך") }
+                Button(enabled = p.cutList.isNotEmpty() || (p.burnNotes && p.notes.isNotEmpty()), onClick = { CommandRunner.run(ctx, p.id, "ייצא") }) { Text("ייצא סרטון ערוך") }
                 OutlinedButton(enabled = p.cutList.isNotEmpty(), onClick = { CommandRunner.run(ctx, p.id, "נקה רשימה") }) { Text("נקה") }
             }
             Spacer(Modifier.height(8.dp))
             OutlinedButton(onClick = { CommandRunner.run(ctx, p.id, "הסר שתיקות") }) { Text("הסר שתיקות אוטומטית") }
         }
+        item { NotesSection(p, player) }
     }
 }
 
@@ -489,5 +500,60 @@ fun TimelineBar(p: Project, player: PlayerState) {
         }
         if (p.shorts.isNotEmpty() || p.cutList.isNotEmpty())
             Text("למעלה: שורטים · באמצע באדום: קטעים שנמחקו", style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+/** Factual corrections: an asterisk with the fix appears at the top of the screen when the mistake is said. */
+@Composable
+private fun NotesSection(p: Project, player: PlayerState) {
+    var editing by remember { mutableStateOf<Int?>(null) }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHighest)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✱ תיקונים עובדתיים על המסך", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                androidx.compose.material3.Switch(p.burnNotes, { v -> ProjectStore.update(p.id) { it.copy(burnNotes = v) } })
+            }
+            Text("כשנאמר משהו לא מדויק, יופיע למעלה במסך כוכבית עם התיקון. הבינה מציעה אותם, ואפשר להוסיף גם ידנית.",
+                style = MaterialTheme.typography.bodySmall)
+            p.notes.forEachIndexed { i, n ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = { player.seek((n.ms - 2000).coerceAtLeast(0)) }) { Icon(Icons.Default.PlayArrow, "נגן") }
+                    Column(Modifier.weight(1f).clickable { editing = i }) {
+                        Text(fmtMs(n.ms), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                        Text(n.text, style = MaterialTheme.typography.bodySmall)
+                    }
+                    IconButton(onClick = { ProjectStore.update(p.id) { it.copy(notes = it.notes.filterIndexed { j, _ -> j != i }) } }) {
+                        Icon(Icons.Default.Delete, "מחק")
+                    }
+                }
+            }
+            FilledTonalButton(onClick = {
+                ProjectStore.update(p.id) { it.copy(notes = (it.notes + com.haessentz.videoeditor.data.FactNote(player.positionMs, "")).sortedBy { n -> n.ms }) }
+                editing = p.notes.count { it.ms <= player.positionMs }
+            }) { Text("+ תיקון ב־${fmtMs(player.positionMs)}") }
+            if (p.notes.isNotEmpty() && p.burnNotes)
+                Text("התיקונים ייכנסו לסרטון הערוך ולשורטים בייצוא הבא.", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+    editing?.let { i ->
+        val n = p.notes.getOrNull(i) ?: run { editing = null; return }
+        var text by remember(i) { mutableStateOf(n.text) }
+        AlertDialog(
+            onDismissRequest = { editing = null },
+            title = { Text("תיקון ב־${fmtMs(n.ms)}") },
+            text = { OutlinedTextField(text, { text = it }, Modifier.fillMaxWidth(), placeholder = { Text("למשל: המקור הוא תניא פרק כ\"ו") }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    ProjectStore.update(p.id) { pr ->
+                        pr.copy(notes = pr.notes.mapIndexed { j, x -> if (j == i) x.copy(text = text.trim()) else x }.filter { it.text.isNotBlank() })
+                    }
+                    editing = null
+                }) { Text("שמור") }
+            },
+            dismissButton = { TextButton(onClick = {
+                ProjectStore.update(p.id) { pr -> pr.copy(notes = pr.notes.filter { it.text.isNotBlank() }) }
+                editing = null
+            }) { Text("ביטול") } }
+        )
     }
 }

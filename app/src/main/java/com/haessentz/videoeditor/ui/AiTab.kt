@@ -333,6 +333,8 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
         r.shorts.map { AiImport.snapToSentences(Range(it.range.startMs, it.range.endMs.coerceAtMost(p.durationMs)), p.transcript) }
     }
     val chapNames = remember(r) { mutableStateListOf(*r.chapters.map { it.title }.toTypedArray()) }
+    val noteSel = remember(r) { mutableStateListOf(*Array(r.notes.size) { true }) }
+    val noteTexts = remember(r) { mutableStateListOf(*r.notes.map { it.text }.toTypedArray()) }
     var title by remember(r) { mutableStateOf(r.title) }
     var desc by remember(r) { mutableStateOf(r.description) }
     var exportEdited by remember { mutableStateOf(true) }
@@ -384,6 +386,22 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
             OutlinedTextField(desc, { desc = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 8,
                 textStyle = MaterialTheme.typography.bodySmall)
 
+            if (r.notes.isNotEmpty()) {
+                Section("✱ תיקונים עובדתיים (${r.notes.size})")
+                Text("יופיעו על המסך, למעלה, בזמן שבו נאמרו. בדוק אותם — הבינה עלולה לטעות.", style = MaterialTheme.typography.labelSmall)
+                r.notes.forEachIndexed { i, n ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(noteSel[i], { v -> noteSel[i] = v })
+                        Column(Modifier.weight(1f)) {
+                            Text(fmtMs(n.ms), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+                            OutlinedTextField(noteTexts[i], { v -> noteTexts[i] = v }, Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodySmall)
+                        }
+                        PlayBtn { player.seek((n.ms - 3000).coerceAtLeast(0)) }
+                    }
+                }
+            }
+
             if (r.chapters.isNotEmpty()) {
                 Section("פרקים (${r.chapters.size})")
                 Text("הזמן הראשון = בסרטון המקורי, החץ = הזמן אחרי המחיקות.", style = MaterialTheme.typography.labelSmall)
@@ -401,7 +419,7 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
             }
 
             HorizontalDivider(Modifier.padding(vertical = 6.dp))
-            if (r.deletes.isNotEmpty()) CheckLine("לייצא מיד את הסרטון הערוך", exportEdited) { exportEdited = it }
+            if (r.deletes.isNotEmpty() || r.notes.isNotEmpty()) CheckLine("לייצא מיד את הסרטון הערוך", exportEdited) { exportEdited = it }
             if (r.shorts.isNotEmpty()) CheckLine("לייצא מיד את השורטים", exportShorts) { exportShorts = it }
             Button(onClick = {
                 val style = SubStyle()
@@ -418,7 +436,8 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                     )
                 }
                 val chapters = r.chapters.mapIndexedNotNull { i, c -> if (chapSel[i]) Chapter(c.ms, chapNames[i].trim()) else null }
-                val doEdited = exportEdited && removed.isNotEmpty()
+                val newNotes = r.notes.mapIndexedNotNull { i, n -> if (noteSel[i] && noteTexts[i].isNotBlank()) n.copy(text = noteTexts[i].trim()) else null }
+                val doEdited = exportEdited && (removed.isNotEmpty() || newNotes.isNotEmpty())
                 ProjectStore.update(p.id) { pr ->
                     pr.copy(
                         cutList = if (r.deletes.isNotEmpty()) removed else pr.cutList,
@@ -429,9 +448,11 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                             chapters = if (r.chapters.isNotEmpty()) chapters else pr.youtube.chapters,
                             videoUri = null,
                         ),
+                        notes = if (r.notes.isNotEmpty()) newNotes else pr.notes,
                         log = (pr.log + LogEntry(false, buildString {
                             append("יובאו מהבינה: ")
                             append("${removed.size} קטעים למחיקה, ${newShorts.size} שורטים, ${chapters.size} פרקים")
+                            if (newNotes.isNotEmpty()) append(", ${newNotes.size} תיקונים עובדתיים")
                             if (title.isNotBlank()) append(", כותרת ותיאור")
                             append(".")
                         })).takeLast(200),
