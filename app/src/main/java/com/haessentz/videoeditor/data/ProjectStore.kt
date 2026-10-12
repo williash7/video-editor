@@ -77,6 +77,10 @@ object Prefs {
     fun lastLessonNo(series: String): Int = sp.getInt("lesson_$series", 0)
     fun setLastLessonNo(series: String, n: Int) = sp.edit().putInt("lesson_$series", n.coerceAtLeast(0)).apply()
 
+    /** Reference photos sent along with every image prompt (files in filesDir/ref). */
+    fun refImages(ctx: Context): List<java.io.File> =
+        (java.io.File(ctx.filesDir, "ref").listFiles() ?: emptyArray()).filter { it.isFile }.sortedBy { it.name }
+
     var lastLanguage: String
         get() = sp.getString("lastLang", "he") ?: "he"
         set(v) = sp.edit().putString("lastLang", v).apply()

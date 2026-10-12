@@ -34,15 +34,17 @@ import java.nio.ByteBuffer
 
 object YouTubeAuth {
     private const val SCOPE = "https://www.googleapis.com/auth/youtube.upload"
+    const val READ_SCOPE = "https://www.googleapis.com/auth/youtube.readonly"
 
-    private fun request(account: String?) = AuthorizationRequest.builder()
-        .setRequestedScopes(listOf(Scope(SCOPE)))
+    private fun request(account: String?, scope: String = SCOPE) = AuthorizationRequest.builder()
+        .setRequestedScopes(listOf(Scope(scope)))
         .apply { if (!account.isNullOrBlank()) setAccount(android.accounts.Account(account, "com.google")) }
         .build()
 
     /** Interactive: may need to show Google's consent screen via [launch]. */
-    fun authorize(activity: Activity, account: String?, launch: (android.content.IntentSender) -> Unit, onToken: (String) -> Unit, onError: (String) -> Unit) {
-        Identity.getAuthorizationClient(activity).authorize(request(account))
+    fun authorize(activity: Activity, account: String?, launch: (android.content.IntentSender) -> Unit, onToken: (String) -> Unit, onError: (String) -> Unit,
+                  scope: String = SCOPE) {
+        Identity.getAuthorizationClient(activity).authorize(request(account, scope))
             .addOnSuccessListener { res ->
                 val pi = res.pendingIntent
                 if (res.hasResolution() && pi != null) launch(pi.intentSender)
@@ -336,5 +338,41 @@ object Thumbs {
             if (f.length() < 1_900_000 || q <= 50) break
             q -= 10
         }
+    }
+}
+
+/** Reads the titles of the channel's uploads, to find the last lesson number in each series. */
+object YouTubeReader {
+    private fun get(url: String, token: String): JSONObject {
+        val c = (URL(url).openConnection() as HttpURLConnection).apply {
+            setRequestProperty("Authorization", "Bearer $token")
+            connectTimeout = 20_000; readTimeout = 30_000
+        }
+        try {
+            val code = c.responseCode
+            if (code !in 200..299) {
+                val err = runCatching { c.errorStream?.bufferedReader()?.readText() }.getOrNull() ?: ""
+                throw YouTubeException("שגיאת יוטיוב $code ${err.take(150)}", code)
+            }
+            return JSONObject(c.inputStream.bufferedReader().readText())
+        } finally { c.disconnect() }
+    }
+
+    /** All upload titles (newest first), up to [max]. */
+    fun uploadTitles(token: String, max: Int = 1000): List<String> {
+        val ch = get("https://www.googleapis.com/youtube/v3/channels?part=contentDetails&mine=true", token)
+        val items = ch.optJSONArray("items") ?: throw YouTubeException("לא נמצא ערוץ בחשבון הזה")
+        val uploads = items.getJSONObject(0).getJSONObject("contentDetails").getJSONObject("relatedPlaylists").getString("uploads")
+        val titles = ArrayList<String>()
+        var page: String? = null
+        do {
+            val url = "https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&maxResults=50&playlistId=$uploads" +
+                    (page?.let { "&pageToken=$it" } ?: "")
+            val r = get(url, token)
+            val arr = r.optJSONArray("items")
+            if (arr != null) for (i in 0 until arr.length()) titles.add(arr.getJSONObject(i).getJSONObject("snippet").optString("title"))
+            page = r.optString("nextPageToken").ifBlank { null }
+        } while (page != null && titles.size < max)
+        return titles
     }
 }

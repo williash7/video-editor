@@ -41,6 +41,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -136,6 +144,7 @@ fun ModelsScreen(nav: Nav) {
                 }
             }
             item { SeriesCounters() }
+            item { RefImagesCard() }
             item {
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp)) {
@@ -199,23 +208,93 @@ private fun ModelCard(
 /** The last published lesson number in each weekly series; new projects continue from it. */
 @Composable
 private fun SeriesCounters() {
+    val ctx = LocalContext.current
+    val activity = ctx as android.app.Activity
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var counts by remember { mutableStateOf(com.haessentz.videoeditor.data.Series.all.associate { it.name to Prefs.lastLessonNo(it.name) }) }
+    var status by remember { mutableStateOf<String?>(null) }
+    fun read(token: String) {
+        status = "קורא את רשימת הסרטונים מהערוץ…"
+        scope.launch {
+            val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { com.haessentz.videoeditor.data.Series.lastNumbersFromTitles(com.haessentz.videoeditor.media.YouTubeReader.uploadTitles(token)) }
+            }
+            r.onSuccess { found ->
+                found.forEach { (k, v) -> Prefs.setLastLessonNo(k, v) }
+                counts = com.haessentz.videoeditor.data.Series.all.associate { it.name to Prefs.lastLessonNo(it.name) }
+                status = if (found.isEmpty()) "לא מצאתי בערוץ כותרות עם שם סדרה ומספר. אפשר לכוון ידנית."
+                    else "עודכן מהערוץ ✓ " + found.entries.joinToString(" · ") { "${it.key} ${it.value}" }
+            }.onFailure { status = "הקריאה מהערוץ נכשלה: ${it.message}" }
+        }
+    }
+    val consent = rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { res ->
+        val t = com.haessentz.videoeditor.media.YouTubeAuth.fromIntent(ctx, res.data)
+        if (t != null) read(t) else status = "ההתחברות לגוגל לא הושלמה."
+    }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp)) {
             Text("סדרות השיעורים", fontWeight = FontWeight.Bold)
             Text("לכל סדרה: מספר השיעור האחרון שכבר פורסם. סרטון חדש מקבל אוטומטית את הסדרה לפי יום ההקלטה, ואת המספר הבא.",
                 style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = {
+                com.haessentz.videoeditor.media.YouTubeAuth.authorize(activity, Prefs.accountFor("he"),
+                    launch = { sender -> consent.launch(androidx.activity.result.IntentSenderRequest.Builder(sender).build()) },
+                    onToken = { t -> read(t) }, onError = { m -> status = m },
+                    scope = com.haessentz.videoeditor.media.YouTubeAuth.READ_SCOPE)
+            }, Modifier.padding(vertical = 6.dp)) { Text("קרא את המספרים מהערוץ ביוטיוב") }
+            status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
             com.haessentz.videoeditor.data.Series.all.forEach { si ->
-                var n by remember { mutableIntStateOf(Prefs.lastLessonNo(si.name)) }
+                val n = counts[si.name] ?: 0
+                fun setN(v: Int) { Prefs.setLastLessonNo(si.name, v); counts = counts + (si.name to v.coerceAtLeast(0)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(si.name)
                         Text("יום ${si.dayName} · עונה ${si.season} בספוטיפיי", style = MaterialTheme.typography.labelSmall)
                     }
-                    IconButton(onClick = { n = (n - 1).coerceAtLeast(0); Prefs.setLastLessonNo(si.name, n) }) { Text("−", style = MaterialTheme.typography.titleLarge) }
+                    IconButton(onClick = { setN((n - 1).coerceAtLeast(0)) }) { Text("−", style = MaterialTheme.typography.titleLarge) }
                     Text("$n", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = { n += 1; Prefs.setLastLessonNo(si.name, n) }) { Text("+", style = MaterialTheme.typography.titleLarge) }
+                    IconButton(onClick = { setN(n + 1) }) { Text("+", style = MaterialTheme.typography.titleLarge) }
                 }
             }
+        }
+    }
+}
+
+/** Photos of the rabbi that are sent automatically with every image prompt. */
+@Composable
+private fun RefImagesCard() {
+    val ctx = LocalContext.current
+    var refs by remember { mutableStateOf(Prefs.refImages(ctx)) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        val dir = java.io.File(ctx.filesDir, "ref").apply { mkdirs() }
+        uris.take(4).forEach { u ->
+            runCatching {
+                val f = java.io.File(dir, "ref_${System.currentTimeMillis()}.jpg")
+                val bmp = ctx.contentResolver.openInputStream(u)?.use { android.graphics.BitmapFactory.decodeStream(it) } ?: return@runCatching
+                val scale = minOf(1f, 1600f / maxOf(bmp.width, bmp.height))
+                val out = if (scale < 1f) android.graphics.Bitmap.createScaledBitmap(bmp, (bmp.width * scale).toInt(), (bmp.height * scale).toInt(), true) else bmp
+                java.io.FileOutputStream(f).use { out.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+            }
+        }
+        refs = Prefs.refImages(ctx)
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("תמונות ייחוס של הרב", fontWeight = FontWeight.Bold)
+            Text("התמונות האלה נשלחות אוטומטית יחד עם פרומפט התמונה למחולל, כדי שהדמות תהיה מזוהה. מומלץ 1–3 תמונות ברורות של הפנים.",
+                style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                refs.forEach { f ->
+                    val bmp = remember(f.path) { android.graphics.BitmapFactory.decodeFile(f.path)?.let { it.asImageBitmap() } }
+                    Box {
+                        if (bmp != null) androidx.compose.foundation.Image(bmp, null,
+                            Modifier.size(72.dp).clip(MaterialTheme.shapes.small), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        Text("✕", Modifier.align(Alignment.TopEnd).background(Color(0x99000000), MaterialTheme.shapes.small)
+                            .clickable { f.delete(); refs = Prefs.refImages(ctx) }.padding(horizontal = 6.dp), color = Color.White)
+                    }
+                }
+            }
+            OutlinedButton(onClick = { pick.launch("image/*") }) { Text(if (refs.isEmpty()) "בחר תמונות מהגלריה" else "הוסף תמונה") }
         }
     }
 }

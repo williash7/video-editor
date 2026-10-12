@@ -62,6 +62,32 @@ object Series {
         return System.currentTimeMillis()
     }
 
+    /**
+     * The highest lesson number per series found in video titles, e.g.
+     * "… | עין יעקב שיעור 3", "… | איגרת התשובה 4", "עין יעקב חלק 1", "סדר היום 2".
+     */
+    fun lastNumbersFromTitles(titles: List<String>): Map<String, Int> {
+        val aliases = mapOf(
+            "סדר היום של יהודי" to listOf("סדר היום של יהודי", "סדר היום"),
+            "פרשת שבוע" to listOf("פרשת שבוע", "פרשת השבוע"),
+            "אגרת התשובה" to listOf("אגרת התשובה", "איגרת התשובה"),
+            "עין יעקב" to listOf("עין יעקב"),
+        )
+        val out = HashMap<String, Int>()
+        for (t in titles) {
+            if (t.contains("#shorts", ignoreCase = true)) continue
+            for ((name, names) in aliases) {
+                for (a in names) {
+                    val m = Regex(Regex.escape(a) + "[\\s\\-–|:]*(?:שיעור|חלק|פרק)?[\\s#]*(\\d{1,3})").find(t) ?: continue
+                    val n = m.groupValues[1].toInt()
+                    if (n > (out[name] ?: 0)) out[name] = n
+                    break
+                }
+            }
+        }
+        return out
+    }
+
     fun dateText(ms: Long): String =
         SimpleDateFormat("d.M.yyyy", Locale.US).apply { timeZone = TimeZone.getTimeZone("Asia/Jerusalem") }.format(ms)
 }

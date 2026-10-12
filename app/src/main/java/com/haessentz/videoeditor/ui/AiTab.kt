@@ -522,18 +522,36 @@ fun CheckLine(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
 fun shortText(p: Project, r: Range): String =
     p.transcript.filter { it.endMs > r.startMs && it.startMs < r.endMs }.joinToString(" ") { it.text.trim() }
 
-/** Copy / share an image-generator prompt. */
+/** Copy / share an image-generator prompt; the rabbi's reference photos (settings) go along with it. */
 @Composable
 fun CopyPromptButtons(text: String) {
     val ctx = LocalContext.current
     var copied by remember(text) { mutableStateOf(false) }
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilledTonalButton(onClick = {
-            clipboard(ctx).setPrimaryClip(ClipData.newPlainText("פרומפט לתמונה", text)); copied = true
-        }) { Text(if (copied) "הועתק ✓" else "העתק למחולל") }
-        OutlinedButton(onClick = {
-            val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
-            ctx.startActivity(Intent.createChooser(i, "שלח למחולל תמונות").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }) { Text("שתף…") }
+    val refs = remember { Prefs.refImages(ctx) }
+    Column {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                // the text also goes to the clipboard: some apps take the photos but drop the text
+                clipboard(ctx).setPrimaryClip(ClipData.newPlainText("פרומפט לתמונה", text))
+                sharePromptWithRefs(ctx, text, refs)
+            }) { Text(if (refs.isEmpty()) "שלח למחולל…" else "שלח למחולל + ${refs.size} תמונות…") }
+            OutlinedButton(onClick = {
+                clipboard(ctx).setPrimaryClip(ClipData.newPlainText("פרומפט לתמונה", text)); copied = true
+            }) { Text(if (copied) "הועתק ✓" else "העתק") }
+        }
+        Text(if (refs.isEmpty()) "אפשר להגדיר תמונות שלך שיישלחו אוטומטית עם הפרומפט: הגדרות ⚙ ← תמונות ייחוס."
+            else "התמונות שלך נשלחות יחד עם הפרומפט, והפרומפט גם מועתק — אם הוא לא הופיע במחולל, פשוט הדבק.",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+fun sharePromptWithRefs(ctx: Context, text: String, refs: List<java.io.File>) {
+    val uris = ArrayList(refs.map { androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", it) })
+    val i = when {
+        uris.isEmpty() -> Intent(Intent.ACTION_SEND).setType("text/plain")
+        uris.size == 1 -> Intent(Intent.ACTION_SEND).setType("image/*").putExtra(Intent.EXTRA_STREAM, uris[0])
+        else -> Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/*").putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+    }.putExtra(Intent.EXTRA_TEXT, text).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    if (uris.isNotEmpty()) i.clipData = ClipData.newRawUri("", uris[0]).apply { uris.drop(1).forEach { addItem(ClipData.Item(it)) } }
+    ctx.startActivity(Intent.createChooser(i, "שלח למחולל תמונות").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }
