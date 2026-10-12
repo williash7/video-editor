@@ -196,7 +196,7 @@ private fun shareAsFile(ctx: Context, p: Project) {
 }
 
 private fun requestText(p: Project) =
-    AiImport.withShortsGuide(AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language)) + "\n\n" + AiImport.transcriptText(p.transcript)
+    AiImport.withThumbGuide(AiImport.withShortsGuide(AiImport.withFactCheck(Prefs.aiPromptFor(p.language), p.language))) + "\n\n" + AiImport.transcriptText(p.transcript)
 
 private fun fixText(p: Project) = AiImport.fixPrompt(p.language) + "\n\n" + AiImport.fixLines(p.transcript)
 
@@ -343,6 +343,7 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
     val noteSel = remember(r) { mutableStateListOf(*Array(r.notes.size) { true }) }
     val noteTexts = remember(r) { mutableStateListOf(*r.notes.map { it.text }.toTypedArray()) }
     var title by remember(r) { mutableStateOf(r.title) }
+    var imagePrompt by remember(r) { mutableStateOf(r.imagePrompt) }
     var desc by remember(r) { mutableStateOf(r.description) }
     var exportEdited by remember { mutableStateOf(true) }
     var exportShorts by remember { mutableStateOf(true) }
@@ -387,6 +388,13 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                         PlayBtn { player.seek(rg.startMs) }
                     }
                 }
+            }
+
+            if (r.imagePrompt.isNotBlank()) {
+                Section("🖼 פרומפט לתמונת השיעור")
+                OutlinedTextField(imagePrompt, { imagePrompt = it }, Modifier.fillMaxWidth(), minLines = 3, maxLines = 8,
+                    textStyle = MaterialTheme.typography.bodySmall)
+                CopyPromptButtons(imagePrompt)
             }
 
             Section("כותרת")
@@ -457,6 +465,7 @@ private fun Review(p: Project, r: AiImport.Result, player: PlayerState, onDone: 
                             description = desc.trim().ifBlank { pr.youtube.description },
                             chapters = if (r.chapters.isNotEmpty()) chapters else pr.youtube.chapters,
                             videoUri = null,
+                            imagePrompt = imagePrompt.trim().ifBlank { pr.youtube.imagePrompt },
                         ),
                         notes = if (r.notes.isNotEmpty()) newNotes else pr.notes,
                         log = (pr.log + LogEntry(false, buildString {
@@ -509,3 +518,19 @@ fun CheckLine(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
 /** The words spoken inside a range, from the transcript. */
 fun shortText(p: Project, r: Range): String =
     p.transcript.filter { it.endMs > r.startMs && it.startMs < r.endMs }.joinToString(" ") { it.text.trim() }
+
+/** Copy / share an image-generator prompt. */
+@Composable
+fun CopyPromptButtons(text: String) {
+    val ctx = LocalContext.current
+    var copied by remember(text) { mutableStateOf(false) }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilledTonalButton(onClick = {
+            clipboard(ctx).setPrimaryClip(ClipData.newPlainText("פרומפט לתמונה", text)); copied = true
+        }) { Text(if (copied) "הועתק ✓" else "העתק למחולל") }
+        OutlinedButton(onClick = {
+            val i = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+            ctx.startActivity(Intent.createChooser(i, "שלח למחולל תמונות").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }) { Text("שתף…") }
+    }
+}

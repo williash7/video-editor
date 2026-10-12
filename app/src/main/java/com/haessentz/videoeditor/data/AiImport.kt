@@ -34,6 +34,9 @@ object AiImport {
 0:00 פתיחה
 מ:שש שם הפרק
 
+### תמונה
+(כאן הפרומפט המלא ליצירת תמונת השיעור — לפי "הנחיות לתמונת השיעור" שלמעלה. כתוב רק את הפרומפט עצמו, בעברית, מוכן להדבקה במחולל תמונות)
+
 כללים: כל הזמנים בפורמט דקות:שניות (או שעות:דקות:שניות), לפי הזמנים בתמלול המקורי. בפרקים: לפחות 3 פרקים, הראשון ב־0:00.
 
 התמלול:
@@ -71,6 +74,9 @@ object AiImport {
 0:00 שם הפרק ברוסית
 מ:שש שם הפרק ברוסית
 
+### תמונה
+(כאן הפרומפט המלא ליצירת תמונת השיעור — לפי "הנחיות לתמונת השיעור" שלמעלה. כתוב רק את הפרומפט עצמו, בעברית, מוכן להדבקה במחולל תמונות)
+
 כללים: כל הזמנים בפורמט דקות:שניות (או שעות:דקות:שניות), לפי הזמנים בתמלול המקורי. בפרקים: לפחות 3 פרקים, הראשון ב־0:00.
 
 התמלול:
@@ -86,6 +92,64 @@ ${(check(lang))}
     private fun check(lang: String) =
         "(בדיקת עובדות: עבור על כל השיעור ובדוק כל מקור שצוטט (ספר, פרק, דף, פסוק), כל ציטוט, שם של אדם, תאריך, מספר, עובדה היסטורית ופסק הלכה שנאמרו. ציין רק טעות ודאית — אם אינך בטוח, אל תציין. לכל טעות: הזמן המדויק שבו נאמרה, ותיקון קצר וברור" +
             (if (lang == "ru") " ברוסית" else "") + " שיופיע על המסך ליד כוכבית. אם לא נמצאו טעויות — השאר את החלק הזה ריק)"
+
+    /** The user's rules for the lesson thumbnail; the AI writes an image prompt from them. */
+    val THUMB_GUIDE = """
+הנחיות לתמונת השיעור (טאמבנייל) — בחלק "### תמונה" כתוב פרומפט מלא ליצירת התמונה:
+
+לאחר קליטת תמלול השיעור, יש לזהות את הרעיון המרכזי, ה־Hook החזק ביותר או הדימוי הבולט ביותר, ומתוכו ליצור טאמבנייל מסקרן ומושך ליוטיוב.
+
+תהליך העבודה
+1. לזהות את השאלה המרכזית, הפאנץ׳ או הרעיון המפתיע של השיעור.
+2. לפצח כותרת חזקה ורעיון ויזואלי מקורי שממחיש את העסקענץ של השיעור.
+3. לכתוב פרומפט מלא ומפורט, מוכן להדבקה במחולל תמונות (ואם אתה יכול ליצור תמונות — צור גם את התמונה עצמה).
+4. לבנות את התמונה סביב רעיון ויזואלי אחד ברור, בלי עומס פרטים.
+
+סגנון התמונה
+5. יחס 16:9, מותאם ליוטיוב.
+6. סגנון ריאליסטי־סוריאליסטי, קולנועי, חד, דרמטי ומושך עין.
+7. להימנע ממראה מצועצע, זוהר מוגזם, קלישאות ותמונות גנריות.
+8. רצוי לשלב הפתעה, מקוריות ולעיתים קריצה קומית המתאימה לתוכן.
+9. להעדיף רעיון מפתיע ובלתי צפוי על פני תמונה רגילה של רב וספרייה.
+
+שמירה על דמות הרב
+10. לשמור על המראה המזוהה לפי תמונת הייחוס: פנים, זקן, משקפיים, כובע שחור, חליפה שחורה וחולצה לבנה.
+11. גם בשימוש בהשתקפות, דמות מקבילה או משל חזותי, יש לשמור על זיהוי ברור של הרב.
+
+גבולות אמוניים וחזותיים — חובה
+12. אין להמחיש בצורה גשמית את הקב״ה, השכינה, מלאכים, נשמות, כוחות אלוקיים או ישויות רוחניות. לא באמצעות דמויות, ידיים מן השמים, כנפיים, פנים, צלליות וכדומה.
+13. יש להתרחק לחלוטין מדימויים וסמלים המזוהים עם נצרות, דתות המזרח או אמונות זרות: הילות קדושים, מלאכים מכונפים, סמלי פולחן, צ׳אקרות, מיסטיקה זרה וכדומה.
+14. רעיונות רוחניים יש להמחיש באמצעות משלים גשמיים: אנשים, חפצים, פעולות וסיטואציות, בלי להציג את המשל כדמותו של המושג הרוחני.
+15. הנאמנות לאמונה היהודית ולתוכן החסידי קודמת לכל שיקול עיצובי.
+
+קומפוזיציה
+16. מוקד מרכזי אחד, מעט אלמנטים וקומפוזיציה ברורה גם בגודל קטן.
+17. התמונה צריכה להעביר את הרעיון בתוך שנייה ולעורר סקרנות.
+
+טקסט על התמונה
+18. כותרת ראשית — בדיוק לפי כותרת הסרטון, בצהוב בוהק עם מסגרת שחורה עבה.
+19. שורת הסבר קצרה בלבן, רק אם נדרשת.
+20. תגית הסדרה בתחתית, קטנה, ברורה ונקייה, למשל: „איגרת התשובה”.
+
+עיקרון מנחה
+הטאמבנייל אינו נועד רק להיות יפה, אלא להמחיש את העסקענץ של השיעור, לעורר סקרנות ולגרום לצופה ללחוץ.
+יש לעבור במהירות מניתוח התמלול לפיצוח הכותרת והקונספט, ומשם לפרומפט, תוך שמירה על כל הכללים לעיל.
+""".trim()
+
+    /** Adds the thumbnail guidance and the "### תמונה" section to any prompt (also an older saved one). */
+    fun withThumbGuide(prompt: String): String {
+        var out = prompt
+        if (!out.contains("### תמונה")) {
+            val i = out.lastIndexOf("התמלול:")
+            val sec = "### תמונה\n(כאן הפרומפט המלא ליצירת תמונת השיעור — לפי \"הנחיות לתמונת השיעור\". כתוב רק את הפרומפט עצמו, בעברית)"
+            out = if (i > 0) out.substring(0, i).trimEnd() + "\n\n" + sec + "\n\n" + out.substring(i) else out.trimEnd() + "\n\n" + sec
+        }
+        if (!out.contains("הנחיות לתמונת השיעור (טאמבנייל)")) {
+            val i = out.lastIndexOf("התמלול:")
+            out = if (i > 0) out.substring(0, i).trimEnd() + "\n\n" + THUMB_GUIDE + "\n\n" + out.substring(i) else out.trimEnd() + "\n\n" + THUMB_GUIDE
+        }
+        return out
+    }
 
     /** Shorts guidance, for prompts the user saved before it existed. */
     private val SHORTS_GUIDE = """
@@ -208,11 +272,12 @@ $extra
         val description: String,
         val chapters: List<Chapter>,
         val notes: List<FactNote> = emptyList(),
+        val imagePrompt: String = "",
     ) {
-        val isEmpty get() = deletes.isEmpty() && shorts.isEmpty() && title.isBlank() && description.isBlank() && chapters.isEmpty() && notes.isEmpty()
+        val isEmpty get() = deletes.isEmpty() && shorts.isEmpty() && title.isBlank() && description.isBlank() && chapters.isEmpty() && notes.isEmpty() && imagePrompt.isBlank()
     }
 
-    private enum class Sec { NONE, DELETE, SHORTS, TITLE, DESC, CHAPTERS, NOTES }
+    private enum class Sec { NONE, DELETE, SHORTS, TITLE, DESC, CHAPTERS, NOTES, IMAGE }
 
     private val timeRe = Regex("""(?<![\d:])(\d{1,2}:\d{2}(?::\d{2})?)(?![\d:])""")
     private val bulletRe = Regex("""^\s*(?:[-*•▪◦>]+|\d+[.)])\s*""")
@@ -237,6 +302,7 @@ $extra
         if (!isMarked && !(t.endsWith(":") || (t.contains(':') && shortHead) || t.split(' ').size <= 2)) return null
         val h = head.lowercase()
         val sec = when {
+            h.contains("תמונה") || h.contains("טאמבנייל") || h.contains("thumbnail") || h.contains("изображ") || h.contains("картин") -> Sec.IMAGE
             h.contains("תיקונ") || h.contains("טעויות") || h.contains("исправ") || h.contains("поправ") || h.contains("ошиб") -> Sec.NOTES
             h.contains("удал") || h.contains("вырез") -> Sec.DELETE
             h.contains("шорт") -> Sec.SHORTS
@@ -269,7 +335,14 @@ $extra
         var title = ""
         val desc = StringBuilder()
         var sec = Sec.NONE
+        val image = StringBuilder()
         for (rawLine in text.lines()) {
+            // the image prompt is free text: inside it only a "###" line starts a new section
+            if (sec == Sec.IMAGE && !rawLine.trimStart().startsWith("#")) {
+                val t = rawLine.trim()
+                if (!t.startsWith("```") && !t.startsWith("(כאן")) image.append(rawLine.trimEnd()).append('\n')
+                continue
+            }
             if (rawLine.isBlank()) {
                 if (sec == Sec.DESC && desc.isNotEmpty()) desc.append('\n')
                 continue
@@ -344,10 +417,10 @@ $extra
                 }
                 Sec.TITLE -> if (title.isEmpty()) title = noBullet.trim('"', '\'', ' ')
                 Sec.DESC -> desc.append(line).append('\n')
-                Sec.NONE -> {}
+                Sec.NONE, Sec.IMAGE -> {}
             }
         }
-        return Result(deletes, shorts, title, desc.toString().trim(), chapters.sortedBy { it.ms }, notes.sortedBy { it.ms })
+        return Result(deletes, shorts, title, desc.toString().trim(), chapters.sortedBy { it.ms }, notes.sortedBy { it.ms }, image.toString().trim())
     }
 
     // ------------------------------------------------------------ chapter timing

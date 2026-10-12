@@ -89,6 +89,8 @@ data class YoutubeMeta(
     val lastVideoId: String? = null,
     /** Google account of the channel to upload to; empty = the default for the project's language. */
     val account: String = "",
+    /** A prompt for an image generator, for the thumbnail (from the AI). */
+    val imagePrompt: String = "",
 )
 
 /** A factual correction shown on screen (an asterisk with the fix) at [ms] on the original timeline. */

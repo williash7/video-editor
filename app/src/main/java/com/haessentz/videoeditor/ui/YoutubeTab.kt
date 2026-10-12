@@ -222,6 +222,22 @@ fun YoutubeTab(p: Project, player: PlayerState) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("תמונה ממוזערת", fontWeight = FontWeight.Bold)
+                    // prompt for an image generator (from the AI, editable)
+                    Text("🖼 פרומפט למחולל תמונות", style = MaterialTheme.typography.labelLarge)
+                    var promptText by remember(p.id, yt.imagePrompt) { mutableStateOf(yt.imagePrompt) }
+                    OutlinedTextField(promptText, { v -> promptText = v; save { it.copy(imagePrompt = v) } }, Modifier.fillMaxWidth(),
+                        minLines = 2, maxLines = 8, textStyle = MaterialTheme.typography.bodySmall,
+                        placeholder = { Text("הבינה תכתוב כאן פרומפט לפי הנחיות התמונה (לשונית בינה). אפשר גם לכתוב לבד.") })
+                    if (promptText.isNotBlank()) CopyPromptButtons(promptText)
+                    else TextButton(onClick = {
+                        val txt = com.haessentz.videoeditor.data.AiImport.THUMB_GUIDE +
+                                "\n\nכותרת הסרטון: " + yt.title + "\n\n" + yt.description
+                        val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("הנחיות לתמונה", txt))
+                    }) { Text("העתק את הנחיות התמונה + הכותרת") }
+                    Text("במחולל: צרף גם תמונה שלך כ\"תמונת ייחוס\", כדי שהדמות תהיה מזוהה. את התמונה שנוצרה טוען כאן ב\"מהגלריה\".",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    HorizontalDividerCompat()
                     if (thumb != null) {
                         Image(thumb, null, Modifier.fillMaxWidth().aspectRatio(16f / 9f), contentScale = ContentScale.Crop)
                     } else {
@@ -363,3 +379,6 @@ fun YoutubeTab(p: Project, player: PlayerState) {
 private fun open(ctx: android.content.Context, url: String) {
     runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
 }
+
+@Composable
+private fun HorizontalDividerCompat() = androidx.compose.material3.HorizontalDivider(Modifier.padding(vertical = 6.dp))
