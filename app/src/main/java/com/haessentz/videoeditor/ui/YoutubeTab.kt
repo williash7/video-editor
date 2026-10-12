@@ -402,12 +402,19 @@ private fun SeriesCard(p: Project) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 com.haessentz.videoeditor.data.Series.all.forEach { si ->
                     FilterChip(p.series == si.name, {
-                        set(si.name, if (p.series == si.name) p.lessonNo else Prefs.lastLessonNo(si.name) + 1)
+                        set(si.name, if (!si.numbered) 0 else if (p.series == si.name) p.lessonNo else Prefs.lastLessonNo(si.name) + 1)
                     }, label = { Text("${si.dayName}: ${si.name}") })
                 }
                 FilterChip(p.series.isBlank(), { set("", 0) }, label = { Text("ללא סדרה") })
             }
-            if (p.series.isNotBlank()) {
+            val numbered = com.haessentz.videoeditor.data.Series.byName(p.series)?.numbered ?: true
+            if (p.series.isNotBlank() && !numbered) {
+                Text("בסדרה הזו אין מספור. הכותרת תסתיים ב: | פרשת <שם הפרשה>", style = MaterialTheme.typography.bodySmall)
+                com.haessentz.videoeditor.data.Series.byName(p.series)?.let { si ->
+                    Text("🎧 ספוטיפיי: עונה ${si.season}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (p.series.isNotBlank() && numbered) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("שיעור מספר", Modifier.weight(1f))
                     IconButton(onClick = { set(p.series, (p.lessonNo - 1).coerceAtLeast(1)) }) { Text("−", style = MaterialTheme.typography.titleLarge) }

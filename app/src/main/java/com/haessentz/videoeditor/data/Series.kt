@@ -5,13 +5,19 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
 
-/** A weekly lesson series: which weekday it is taught on, and its Spotify season number. */
-data class SeriesInfo(val name: String, val weekday: Int, val season: Int, val dayName: String)
+/**
+ * A weekly lesson series. [name] is the key and the tag on the thumbnail; [titleName] ends the YouTube title
+ * ("… | סדר היום 5"); [numbered] = lessons carry a running number.
+ */
+data class SeriesInfo(
+    val name: String, val weekday: Int, val season: Int, val dayName: String,
+    val titleName: String = name, val numbered: Boolean = true,
+)
 
 object Series {
     val all = listOf(
-        SeriesInfo("סדר היום של יהודי", Calendar.SUNDAY, 1, "ראשון"),
-        SeriesInfo("פרשת שבוע", Calendar.MONDAY, 2, "שני"),
+        SeriesInfo("סדר היום של יהודי", Calendar.SUNDAY, 1, "ראשון", titleName = "סדר היום"),
+        SeriesInfo("פרשת שבוע", Calendar.MONDAY, 2, "שני", numbered = false),
         SeriesInfo("אגרת התשובה", Calendar.TUESDAY, 3, "שלישי"),
         SeriesInfo("עין יעקב", Calendar.WEDNESDAY, 4, "רביעי"),
     )
@@ -24,8 +30,14 @@ object Series {
         return all.firstOrNull { it.weekday == c.get(Calendar.DAY_OF_WEEK) }
     }
 
-    /** "…hook… | עין יעקב שיעור 3" — the ending every title must have. */
-    fun suffix(series: String, no: Int) = if (series.isBlank() || no <= 0) "" else "$series שיעור $no"
+    /** The channel's last published numbers as of Oct 2026 (used until the user sets or reads them). */
+    val knownLast = mapOf("סדר היום של יהודי" to 5, "אגרת התשובה" to 6, "עין יעקב" to 4)
+
+    /** "…hook… | עין יעקב 4" — the ending every title in a numbered series must have. */
+    fun suffix(series: String, no: Int): String {
+        val si = byName(series) ?: return ""
+        return if (!si.numbered || no <= 0) "" else "${si.titleName} $no"
+    }
 
     /** Makes sure the title ends with " | <series> שיעור <n>" (replacing an older ending if there is one). */
     fun withSuffix(title: String, series: String, no: Int): String {
@@ -35,12 +47,13 @@ object Series {
         return if (hook.isEmpty()) suf else "$hook | $suf"
     }
 
-    /** The part of the title before " | <series> …" (used as the big text on the thumbnail). */
-    fun hookOf(title: String): String {
-        val t = title.trim()
-        val i = all.map { t.lastIndexOf("| " + it.name) }.filter { it >= 0 }.maxOrNull()
-        return (if (i != null) t.substring(0, i) else t).trim().trimEnd('|').trim()
+    private val tailRe by lazy {
+        val names = all.flatMap { listOf(it.name, it.titleName) } + listOf("איגרת התשובה", "פרשת")
+        Regex("""\|\s*(?:""" + names.joinToString("|") { Regex.escape(it) } + """).*$""")
     }
+
+    /** The part of the title before " | <series> …" (used as the big text on the thumbnail). */
+    fun hookOf(title: String): String = title.trim().replace(tailRe, "").trim().trimEnd('|').trim()
 
     /** Recording date from the video's metadata or its file name (e.g. 102027_20261008), else now. */
     fun recordingDate(metaDate: String?, fileName: String): Long {

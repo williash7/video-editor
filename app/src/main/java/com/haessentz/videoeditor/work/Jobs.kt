@@ -307,7 +307,7 @@ object Jobs {
                 token, account
             ) { f, d -> js.progress(f, d) }
             ProjectStore.update(pid) { pr ->
-                if (pr.series.isNotBlank() && pr.lessonNo > Prefs.lastLessonNo(pr.series)) Prefs.setLastLessonNo(pr.series, pr.lessonNo)
+                if (pr.series.isNotBlank() && pr.lessonNo > 0 && pr.lessonNo > Prefs.lastLessonNo(pr.series)) Prefs.setLastLessonNo(pr.series, pr.lessonNo)
                 pr.copy(youtube = pr.youtube.copy(lastVideoId = id),
                     outputs = pr.outputs.map { if (it.uri == plan.fileUri) it.copy(youtubeId = id) else it })
             }

@@ -243,7 +243,7 @@ private fun SeriesCounters() {
                     scope = com.haessentz.videoeditor.media.YouTubeAuth.READ_SCOPE)
             }, Modifier.padding(vertical = 6.dp)) { Text("קרא את המספרים מהערוץ ביוטיוב") }
             status?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary) }
-            com.haessentz.videoeditor.data.Series.all.forEach { si ->
+            com.haessentz.videoeditor.data.Series.all.filter { it.numbered }.forEach { si ->
                 val n = counts[si.name] ?: 0
                 fun setN(v: Int) { Prefs.setLastLessonNo(si.name, v); counts = counts + (si.name to v.coerceAtLeast(0)) }
                 Row(verticalAlignment = Alignment.CenterVertically) {

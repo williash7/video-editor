@@ -74,7 +74,7 @@ object Prefs {
     fun setAccountFor(lang: String, email: String) = sp.edit().putString("acct_$lang", email.trim()).apply()
 
     /** The last lesson number published in a series. */
-    fun lastLessonNo(series: String): Int = sp.getInt("lesson_$series", 0)
+    fun lastLessonNo(series: String): Int = sp.getInt("lesson_$series", Series.knownLast[series] ?: 0)
     fun setLastLessonNo(series: String, n: Int) = sp.edit().putInt("lesson_$series", n.coerceAtLeast(0)).apply()
 
     /** Reference photos sent along with every image prompt (files in filesDir/ref). */
