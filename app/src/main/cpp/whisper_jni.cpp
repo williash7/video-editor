@@ -84,7 +84,8 @@ Java_com_haessentz_videoeditor_media_WhisperLib_systemInfo(JNIEnv *env, jobject 
 JNIEXPORT jint JNICALL
 Java_com_haessentz_videoeditor_media_WhisperLib_transcribe(JNIEnv *env, jobject /*thiz*/, jlong ptr,
                                                          jstring pcmPath, jstring language,
-                                                         jint threads, jint maxLen, jlong offsetMs, jobject callback) {
+                                                         jint threads, jint maxLen, jlong offsetMs, jlong durationMs,
+                                                         jint mode, jobject callback) {
     auto *ctx = reinterpret_cast<whisper_context *>(ptr);
     if (ctx == nullptr) return -100;
 
@@ -121,12 +122,23 @@ Java_com_haessentz_videoeditor_media_WhisperLib_transcribe(JNIEnv *env, jobject 
     std::string langStr(lang);
     env->ReleaseStringUTFChars(language, lang);
 
-    whisper_full_params p = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    // mode 0 = normal (fast), 1 = careful (beam search), 2 = careful + start at a higher temperature.
+    // The careful modes are used to re-transcribe short stretches where the normal pass got stuck in a loop.
+    whisper_full_params p = whisper_full_default_params(mode > 0 ? WHISPER_SAMPLING_BEAM_SEARCH : WHISPER_SAMPLING_GREEDY);
+    if (mode > 0) {
+        p.beam_search.beam_size = 5;
+        p.greedy.best_of = 5;
+    }
+    // a lower-entropy (= repetitive) result triggers a retry at a higher temperature sooner
+    p.entropy_thold = mode > 0 ? 2.8f : 2.6f;
+    p.temperature = mode == 2 ? 0.4f : 0.0f;
+    p.temperature_inc = 0.2f;
     p.n_threads = threads;
     p.language = langStr.c_str();
     p.translate = false;
     p.no_context = true;
     p.offset_ms = (int) offsetMs;
+    p.duration_ms = (int) durationMs;
     p.print_progress = false;
     p.print_realtime = false;
     p.print_timestamps = false;

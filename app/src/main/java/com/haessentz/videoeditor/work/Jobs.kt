@@ -99,7 +99,7 @@ object Jobs {
 
                             override fun onProgress(progress: Int) {}
                         }
-                        val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, lang, Prefs.threads, 60, resumeMs, cb)
+                        val r = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, lang, Prefs.threads, 60, resumeMs, 0L, 0, cb)
                         currentCoroutineContext().ensureActive()
                         if (r != 0) throw IllegalStateException("התמלול נכשל (קוד $r)")
                     } finally {
@@ -110,11 +110,82 @@ object Jobs {
                     ProjectStore.update(pid) { it.copy(transcribed = true) }
                     addLog(pid, "התמלול הסתיים: ${segs.size} משפטים. עכשיו אפשר לחפש, ליצור שורטים עם כתוביות ועוד.")
                 }
+                // right away fix places where the transcription got stuck repeating the same words
+                val tr = ProjectStore.get(pid)?.transcript ?: emptyList()
+                val ranges = com.haessentz.videoeditor.data.Loops.badRanges(tr)
+                if (ranges.isNotEmpty()) repairRanges(ctx, pid, js, ranges, pcm, modelId, lang)
+
             } finally {
                 // reached on finish, error or "בטל" — but not when Android kills the app, so that case resumes
                 ProjectStore.update(pid) { it.copy(transcribing = false) }
             }
         }
+    }
+
+    /**
+     * Re-transcribes only the places where the transcription got stuck in a loop (the same word or
+     * phrase over and over), carefully, and puts the new text in place of the broken lines.
+     */
+    fun repairTranscript(ctx: Context, pid: String): String? {
+        val p = ProjectStore.get(pid) ?: return null
+        if (JobManager.jobs.value.any { it.projectId == pid && it.kind == "transcribe" && it.active }) return null
+        val ranges = com.haessentz.videoeditor.data.Loops.badRanges(p.transcript)
+        if (ranges.isEmpty()) { addLog(pid, "לא נמצאו קטעים פגומים בתמלול."); return null }
+        val lang = p.language
+        val modelId = Prefs.modelFor(lang)
+        return JobManager.enqueue(ctx, "תיקון תמלול: ${p.name}", pid, kind = "transcribe") { js ->
+            if (!ModelManager.isReady(ctx, modelId)) throw IllegalStateException("לא הורד מודל תמלול ל${com.haessentz.videoeditor.media.Langs.name(lang)}. היכנס להגדרות ⚙ והורד מודל.")
+            val pcm = ensurePcm(ctx, p, js, 0f, 0.05f)
+            repairRanges(ctx, pid, js, ranges, pcm, modelId, lang)
+        }
+    }
+
+    private suspend fun repairRanges(ctx: Context, pid: String, js: JobScope, ranges: List<com.haessentz.videoeditor.data.Range>,
+                                     pcm: File, modelId: String, lang: String) {
+        val total = ranges.sumOf { it.lengthMs }.coerceAtLeast(1)
+        addLog(pid, "נמצאו ${ranges.size} קטעים שבהם התמלול חזר על אותן מילים (${com.haessentz.videoeditor.data.fmtMs(total)} בסך הכול). מתמלל אותם מחדש בזהירות…")
+        js.phase(0.05f, "טוען את מודל התמלול…")
+        var fixed = 0
+        var stillBad = 0
+        withContext(Dispatchers.IO) {
+            WhisperLib.setAbort(false)
+            js.onCancel { WhisperLib.setAbort(true) }
+            val ctxPtr = WhisperLib.initContext(ModelManager.file(ctx, modelId).absolutePath)
+            if (ctxPtr == 0L) throw IllegalStateException("טעינת המודל נכשלה. אולי הקובץ פגום — נסה למחוק ולהוריד שוב.")
+            try {
+                var doneMs = 0L
+                for (r in ranges) {
+                    var best: List<Seg> = emptyList()
+                    // first a careful pass; if it still loops, once more starting at a higher temperature
+                    for (mode in 1..2) {
+                        val out = ArrayList<Seg>()
+                        val cb = object : WhisperLib.Callback {
+                            override fun onSegment(t0: Long, t1: Long, text: ByteArray) {
+                                val t = String(text, Charsets.UTF_8).trim()
+                                if (t.isNotEmpty()) out.add(Seg(t0, t1, t))
+                                val f = ((doneMs + (t1 - r.startMs).coerceIn(0, r.lengthMs)).toFloat() / total).coerceIn(0f, 1f)
+                                js.progress(0.05f + 0.95f * f, "מתמלל מחדש ${com.haessentz.videoeditor.data.fmtMs(r.startMs)}–${com.haessentz.videoeditor.data.fmtMs(r.endMs)}…")
+                            }
+                            override fun onProgress(progress: Int) {}
+                        }
+                        val res = WhisperLib.transcribe(ctxPtr, pcm.absolutePath, lang, Prefs.threads, 60, r.startMs, r.lengthMs, mode, cb)
+                        currentCoroutineContext().ensureActive()
+                        if (res != 0) throw IllegalStateException("התמלול נכשל (קוד $res)")
+                        best = out
+                        if (com.haessentz.videoeditor.data.Loops.badIndices(out).isEmpty()) break
+                    }
+                    if (com.haessentz.videoeditor.data.Loops.badIndices(best).isNotEmpty()) stillBad++
+                    if (best.isNotEmpty()) {
+                        ProjectStore.update(pid) { it.copy(transcript = com.haessentz.videoeditor.data.Loops.replace(it.transcript, r, best)) }
+                        fixed++
+                    }
+                    doneMs += r.lengthMs
+                }
+            } finally {
+                WhisperLib.freeContext(ctxPtr)
+            }
+        }
+        addLog(pid, "תוקנו $fixed קטעים." + if (stillBad > 0) " ב־$stillBad מהם עדיין יש חזרות — כדאי להאזין ולתקן ידנית (לחיצה ארוכה על משפט)." else "")
     }
 
     /** Called when the app opens: continues any transcription that was cut off by the app being closed. */

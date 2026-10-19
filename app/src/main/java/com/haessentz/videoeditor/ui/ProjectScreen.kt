@@ -286,6 +286,8 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
         p.transcript.indices.filter { filter.isBlank() || p.transcript[it].text.contains(filter.trim(), ignoreCase = true) }
     }
     val current = p.transcript.indexOfFirst { player.positionMs >= it.startMs && player.positionMs < it.endMs }
+    val loopBad = remember(p.transcript) { com.haessentz.videoeditor.data.Loops.badIndices(p.transcript) }
+    val loopRanges = remember(p.transcript) { com.haessentz.videoeditor.data.Loops.badRanges(p.transcript) }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(filter, { filter = it }, Modifier.weight(1f), placeholder = { Text("חיפוש בתמלול") }, singleLine = true)
@@ -293,12 +295,30 @@ private fun TranscriptTab(p: Project, player: PlayerState, nav: Nav) {
         }
         if (running) Text("עדיין מתמלל… מה שכבר תומלל נשמר, גם אם יוצאים מהאפליקציה.", Modifier.padding(8.dp), style = MaterialTheme.typography.bodySmall)
         BatteryCard()
+        if (!running && loopRanges.isNotEmpty()) {
+            androidx.compose.material3.Card(
+                Modifier.fillMaxWidth().padding(8.dp),
+                colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("⚠ בתמלול יש ${loopRanges.size} קטעים שבהם התמלול נתקע וחזר על אותן מילים " +
+                        "(${fmtMs(loopRanges.sumOf { it.lengthMs })} בסך הכול). הם מסומנים באדום.", fontWeight = FontWeight.Bold)
+                    Text(loopRanges.joinToString(" · ") { "${fmtMs(it.startMs)}–${fmtMs(it.endMs)}" }, style = MaterialTheme.typography.bodySmall)
+                    Button(onClick = { Jobs.repairTranscript(ctx, p.id) }) { Text("תמלל מחדש רק את הקטעים האלה") }
+                }
+            }
+        }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(8.dp)) {
             items(idxs, key = { it }) { i ->
                 val s = p.transcript[i]
                 Row(
                     Modifier.fillMaxWidth()
-                        .background(if (i == current) MaterialTheme.colorScheme.primaryContainer else Color.Transparent, RoundedCornerShape(8.dp))
+                        .background(
+                            when {
+                                i == current -> MaterialTheme.colorScheme.primaryContainer
+                                i in loopBad -> MaterialTheme.colorScheme.errorContainer
+                                else -> Color.Transparent
+                            }, RoundedCornerShape(8.dp))
                         .combinedClickable(onClick = { player.seek(s.startMs) }, onLongClick = { if (!running) editing = i })
                         .padding(8.dp)
                 ) {
